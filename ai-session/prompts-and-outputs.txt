@@ -1,0 +1,869 @@
+Maple Freight hackathon: AI session (prompts and replies)
+Tool: Claude Code (Claude desktop app), October 16, 2026
+Contains every prompt Zack sent and every written reply from Claude, in order.
+Not included: Claude's internal tool calls and their raw output (file reads, commands, test runs).
+Email addresses and access tokens are redacted.
+A few short progress notes Claude wrote between steps were not saved in the app's session log, so they are not here.
+"[Request interrupted by user]" marks where Zack stopped Claude mid-task to add instructions.
+==============================================================================
+
+----- ZACK -----
+create a new git repo called maple
+
+----- CLAUDE -----
+I created a new git repo at [maple/](maple) with `main` as the default branch. It's empty and has no commits yet. It's only on this computer. If you want it on GitHub too, I can create a remote repo and push to it.
+
+Something I noticed: your whole user folder (`C:\Users\zacka`) is itself a git repo, and a `README.md` there is staged for commit. That may be leftover from an accidental `git init`. It doesn't affect maple, but I can help clean it up.
+
+If you want to keep this work, I can move this session to a folder you choose.
+
+----- ZACK -----
+push it to github
+
+----- CLAUDE -----
+I can't push yet. Two things are missing on this computer:
+
+1. **The GitHub CLI (`gh`) isn't installed**, and git isn't signed in to GitHub. I can't sign in for you, so the login has to come from you.
+2. **Git has no name or email set**, so it can't make commits. The repo also has no commits yet, so there's nothing to push.
+
+Easiest fix: install the GitHub CLI and log in once:
+
+```bash
+winget install --id GitHub.cli
+```
+
+```bash
+gh auth login
+```
+
+Then tell me:
+- **Public or private?** I'll make it private unless you say otherwise.
+- **Git name and email** for your commits. I can use `[email redacted]` if you want, or GitHub's private noreply address.
+- **First commit:** OK to add a simple `README.md`? A repo needs at least one commit before it can be pushed.
+
+Once that's done, I'll create `maple` on GitHub, make the first commit, and push it.
+
+If you'd rather not install the CLI, create an empty repo named `maple` at github.com/new and paste me the URL. Git will then ask you to sign in in your browser the first time I push.
+
+----- ZACK -----
+zackt223
+
+----- ZACK -----
+[Request interrupted by user]
+
+----- ZACK -----
+[Pasted content]
+gh auth login
+gh : The term 'gh' is not recognized as the name 
+of a cmdlet, function, script file, or operable 
+program. Check the spelling of the name, or if a 
+path was included, verify that the path is 
+correct and try again.
+At line:1 char:1
++ gh auth login
++ ~~
+    + CategoryInfo          : ObjectNotFound: (g 
+   h:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundExc 
+   eption
+[End of pasted content]
+
+email is [email redacted]
+
+----- CLAUDE -----
+I've set your email ([email redacted]) and name (zackt223) on the maple repo, but it isn't on GitHub yet. Two things are in the way.
+
+**1. GitHub login.** The CLI did install. Your terminal was just opened before the install, so it doesn't know where `gh` is yet. Either open a new terminal and run `gh auth login`, or run it from where it's installed:
+
+```bash
+& "C:\Program Files\GitHub CLI\gh.exe" auth login
+```
+
+Pick GitHub.com, then HTTPS, then log in with a web browser.
+
+**2. The repo needs a different location.** Git failed to save the first commit because the folder the app made for this session is buried too deep: the path is longer than git can handle. To fix this, I need to move this session to a folder you choose, with a shorter path like `C:\Users\zacka\Projects`. Tell me where you'd like maple to live, or say "Documents" and I'll make a folder for it there.
+
+After you've logged in and picked a folder, I'll make the first commit (a simple README), create `zackt223/maple` on GitHub as private, and push.
+
+----- ZACK -----
+check now
+
+----- CLAUDE -----
+You're not logged in yet. The login stopped partway through, and it looks like a personal access token (it starts with `ghp_`) was pasted into the menu step.
+
+**Treat that token as exposed.** It's printed in your terminal and was readable by me just now. Delete it at github.com/settings/tokens and don't use it again.
+
+To finish logging in, press **Ctrl+C** to cancel the current login and start it again:
+
+```bash
+& "C:\Program Files\GitHub CLI\gh.exe" auth login
+```
+
+This time, when it asks **"How would you like to authenticate GitHub CLI?"**, use the arrow keys to pick **Login with a web browser** and press Enter. Don't paste anything at that prompt. It will show a one-time code: copy it, press Enter, and approve the login in the browser page that opens. No token needed.
+
+I still need one more thing from you: **where should maple live?** Git can't save the first commit in the current folder because its path is too long. Name a folder, or say "Documents" and I'll make one there. Once you're logged in and I have a folder, I'll create `zackt223/maple` on GitHub as private and push.
+
+----- ZACK -----
+should be setup, push the repo
+
+----- CLAUDE -----
+Login worked. Now I need a folder for maple that git can write to.
+
+Empty folder. Setting up the repo there and pushing:
+
+maple is now on GitHub as a private repo: https://github.com/zackt223/maple
+
+I set it up in `C:\Users\zacka\maple`, the folder you picked, and this session now works from there. It has one commit with a basic `README.md`, made as zackt223 with [email redacted]. Local `main` is linked to GitHub, so from now on `git push` and `git pull` work without extra setup.
+
+Two leftovers:
+- **Delete the `ghp_` token** from earlier at github.com/settings/tokens if you haven't. You're now logged in a different way, so nothing depends on it.
+- **Your whole user folder (`C:\Users\zacka`) is still a git repo**, and maple sits inside it. maple has its own repo, so this doesn't break anything, but the outer repo is probably accidental. I can help remove it if you want.
+
+----- ZACK -----
+make the repo public
+
+----- CLAUDE -----
+maple is now public: https://github.com/zackt223/maple
+
+Anyone can now see your email, [email redacted], because it's recorded in the first commit. If you'd rather keep it private, I can switch the repo to GitHub's private noreply address and redo that commit so the email doesn't appear anywhere.
+
+----- ZACK -----
+[Pasted content]
+The situation
+Maple Freight is a fictional trucking company with 60 vehicles across three depots: North Yard, Airport Hub
+and Hamilton Depot. You have 14 days of alerts from their vehicle telematics devices (September 8–21, 2026),
+plus a vehicle list, a fault-code reference, the shop's work orders and the telematics vendor's account notes.
+It's Monday, September 21, at 6:00 p.m. Eastern, and the export was just taken. The operations manager will
+open what you build tonight, and again before the 6:00 a.m. dispatch tomorrow.
+What the team told us
+SAFETY MANAGER
+“We get 150+ alerts a day. My team ignores most of them. I need an AI that ranks every alert high,
+medium or low. And D-17 is clearly our worst driver. He tops the list every week.”
+MAINTENANCE LEAD
+“We only look at engine faults the vendor marks HIGH. Everything else is noise. And V-137's overheating
+was a bad sensor. The shop fixed it this morning.”
+OPERATIONS MANAGER
+“My team can realistically act on about 10 things a day.”
+[End of pasted content]
+
+the solution? a dashboard that will prioritize high and critical alerts with actioning steps for operations, safety, and maintanence team that filters out low/medium alerts to another section
+
+in reference to the data provided, speeding alerts that exceed 115km/h should show into the high alerts section; anything at 115km/h or below can appear as medium; harsh breaking exceeding an extremely cautioning amount (you decide according to the data and common knowldge) can show up as a high alert as well. any engine faults, maintannce needed, unplugged devices, or extremely cautioning alerts also appear in the high/critical alerts section. 
+
+this solution is due to exceeding high/critical alerts flooding the dashboard, this allows the team to work on each alert without having to deal with an extreme backlog
+
+low/medium alerts that do not fall under any work orders required have a separate section
+
+allow separate sections for maintenance teams to operate under. operations and safety managers are able to escalate issues to maintenance teams and categorize them based on priority.
+
+each user must have appropriate permissions. maintenance users can only approve work orders, add estimated completion times, and add notes to work orders for ops and safety to monitor.
+
+as for UI, follow /anthropic-skills:apple-design and ensure that alerts are color coded based on the priority/alert
+
+----- ZACK -----
+[Request interrupted by user]
+
+----- ZACK -----
+before building, ensure that a metrics section is provided and that this is included in the readme
+
+[Pasted content]
+Metrics: 
+action taken to resolve issues with workflow provided
+
+Primary: 
+high alerts / critical alerts resolved through the dashboard
+
+Guardrail: 
+% of high alerts sent > workflow actions taken
+
+must run from repo with commands in the readme
+
+mention what to act on, why it matters, evidence from data and action in the readme
+
+include sample output if build needs API key
+[End of pasted content]
+
+[Pasted content]
+The situation
+Maple Freight is a fictional trucking company with 60 vehicles across three depots: North Yard, Airport Hub
+and Hamilton Depot. You have 14 days of alerts from their vehicle telematics devices (September 8–21, 2026),
+plus a vehicle list, a fault-code reference, the shop's work orders and the telematics vendor's account notes.
+It's Monday, September 21, at 6:00 p.m. Eastern, and the export was just taken. The operations manager will
+open what you build tonight, and again before the 6:00 a.m. dispatch tomorrow.
+What the team told us
+SAFETY MANAGER
+“We get 150+ alerts a day. My team ignores most of them. I need an AI that ranks every alert high,
+medium or low. And D-17 is clearly our worst driver. He tops the list every week.”
+MAINTENANCE LEAD
+“We only look at engine faults the vendor marks HIGH. Everything else is noise. And V-137's overheating
+was a bad sensor. The shop fixed it this morning.”
+OPERATIONS MANAGER
+“My team can realistically act on about 10 things a day.”
+
+the solution? a dashboard that will prioritize high and critical alerts with actioning steps for operations, safety, and maintanence team that filters out low/medium alerts to another section
+
+in reference to the data provided, speeding alerts that exceed 115km/h should show into the high alerts section; anything at 115km/h or below can appear as medium; harsh breaking exceeding an extremely cautioning amount (you decide according to the data and common knowldge) can show up as a high alert as well. any engine faults, maintannce needed, unplugged devices, or extremely cautioning alerts also appear in the high/critical alerts section. 
+
+this solution is due to exceeding high/critical alerts flooding the dashboard, this allows the team to work on each alert without having to deal with an extreme backlog
+
+low/medium alerts that do not fall under any work orders required have a separate section
+
+allow separate sections for maintenance teams to operate under. operations and safety managers are able to escalate issues to maintenance teams and categorize them based on priority.
+
+each user must have appropriate permissions. maintenance users can only approve work orders, add estimated completion times, and add notes to work orders for ops and safety to monitor.
+
+as for UI, follow /anthropic-skills:apple-design and ensure that alerts are color coded based on the priority/alert
+[End of pasted content]
+
+----- ZACK -----
+[Request interrupted by user]
+
+----- ZACK -----
+@"C:\Users\zacka\Downloads\Maple_Freight_Challenge\data\vehicles.csv" @"C:\Users\zacka\Downloads\Maple_Freight_Challenge\data\work_orders.csv" @"C:\Users\zacka\Downloads\Maple_Freight_Challenge\data\vendor_notes.md" @"C:\Users\zacka\Downloads\Maple_Freight_Challenge\data\alerts.csv" @"C:\Users\zacka\Downloads\Maple_Freight_Challenge\data\dtc_reference.csv"
+
+[Pasted content]
+before building, ensure that a metrics section is provided and that this is included in the readme
+Metrics: 
+action taken to resolve issues with workflow provided
+
+Primary: 
+high alerts / critical alerts resolved through the dashboard
+
+Guardrail: 
+% of high alerts sent > workflow actions taken
+
+must run from repo with commands in the readme
+
+mention what to act on, why it matters, evidence from data and action in the readme
+
+include sample output if build needs API key
+
+The situation
+Maple Freight is a fictional trucking company with 60 vehicles across three depots: North Yard, Airport Hub
+and Hamilton Depot. You have 14 days of alerts from their vehicle telematics devices (September 8–21, 2026),
+plus a vehicle list, a fault-code reference, the shop's work orders and the telematics vendor's account notes.
+It's Monday, September 21, at 6:00 p.m. Eastern, and the export was just taken. The operations manager will
+open what you build tonight, and again before the 6:00 a.m. dispatch tomorrow.
+What the team told us
+SAFETY MANAGER
+“We get 150+ alerts a day. My team ignores most of them. I need an AI that ranks every alert high,
+medium or low. And D-17 is clearly our worst driver. He tops the list every week.”
+MAINTENANCE LEAD
+“We only look at engine faults the vendor marks HIGH. Everything else is noise. And V-137's overheating
+was a bad sensor. The shop fixed it this morning.”
+OPERATIONS MANAGER
+“My team can realistically act on about 10 things a day.”
+
+the solution? a dashboard that will prioritize high and critical alerts with actioning steps for operations, safety, and maintanence team that filters out low/medium alerts to another section
+
+in reference to the data provided, speeding alerts that exceed 115km/h should show into the high alerts section; anything at 115km/h or below can appear as medium; harsh breaking exceeding an extremely cautioning amount (you decide according to the data and common knowldge) can show up as a high alert as well. any engine faults, maintannce needed, unplugged devices, or extremely cautioning alerts also appear in the high/critical alerts section. 
+
+this solution is due to exceeding high/critical alerts flooding the dashboard, this allows the team to work on each alert without having to deal with an extreme backlog
+
+low/medium alerts that do not fall under any work orders required have a separate section
+
+allow separate sections for maintenance teams to operate under. operations and safety managers are able to escalate issues to maintenance teams and categorize them based on priority.
+
+each user must have appropriate permissions. maintenance users can only approve work orders, add estimated completion times, and add notes to work orders for ops and safety to monitor.
+
+as for UI, follow /anthropic-skills:apple-design and ensure that alerts are color coded based on the priority/alert
+[End of pasted content]
+
+----- CLAUDE -----
+Data findings are in. Committing the data, then writing the triage engine.
+
+Now the triage engine — every rule lives in one file so it's easy to explain and change.
+
+Triage output looks right: V-137 is #1, V-151 is #2, and D-17 ranks 1st on raw counts but 56th of 60 once you normalize. Small fixes, then the server.
+
+Now the server, which enforces permissions on its side:
+
+Now the dashboard UI, styled to the Apple design guidance:
+
+Now package.json, the CLI report (sample output), and tests:
+
+The engine is producing correct output. Two fixes: the test-runner path, and an unworked P0300 misfire with no work order (V-151) should rank above driver coaching.
+
+All 12 tests pass. Committing, then checking the UI in the browser.
+
+Renders well in dark mode. Now I'll test the full workflow: Ops escalates, then Maintenance approves.
+
+The escalation flowed through. Next I'll approve it as Maintenance and confirm Ops gets blocked from approving.
+
+Quick update: the dashboard works end to end. Ops can escalate, Maintenance can approve, and the server blocks the wrong roles. I'm finishing the last workflow check, then writing the README.
+
+Everything works end to end: Ops sees Maintenance's ETA and note right on the case card. Now the README.
+
+I'll correct one number in the README (29, not 42) and make the AI-use section accurate about who caught what:
+
+Now the AI-session export:
+
+The export contains the GitHub token that was pasted earlier, so I won't put it in the public repo. Updating the README to match, then committing:
+
+The dashboard is built and committed in `C:\Users\zacka\maple`, but **it isn't on GitHub yet**. My push was blocked by the permission check, so you need to run it yourself (or approve it if I retry):
+
+```bash
+git -C C:\Users\zacka\maple push
+```
+
+All 12 tests pass. I tested the full workflow in the browser: Ops escalated V-137, Maintenance approved it and added an ETA and a note, and Ops saw both on the case card. The server refused when Ops tried to approve a work order.
+
+**What's in it:**
+- **Tonight:** the top 10 cases, ranked, colour-coded (red critical, orange high, yellow medium, grey low), each with action steps for the right team and the evidence behind it.
+- **High & critical backlog:** the other 194 cases, ranked.
+- **Maintenance:** escalated cases arrive as work orders waiting for approval. Maintenance can only approve, set an ETA and add notes.
+- **Low & medium:** 1,743 alerts that aren't tied to a work order, with filters.
+- **Drivers:** risk per 100 km, adjusted for firmware differences.
+- **Activity:** a log of every action.
+- **Metrics cards:** the primary metric, the guardrail and workflow actions, as you specified. They're also documented in the README.
+
+**Tonight's top 3, from the data:**
+1. **Ground V-137.** Its temperature rose every day (104 → 118 °C), and seven hours after the "bad sensor" fix it threw a critical oil-pressure fault. The vendor marked all of these MEDIUM, so the Maintenance Lead's "HIGH only" filter never showed them.
+2. **Five misfires with no work order, four of them at Hamilton Depot.** V-151 also has a misfire and is 2,350 km overdue for service, with its service booked for Oct 5. Hamilton's alerts arrive up to 30 hours late, which probably explains why nobody acted on them.
+3. **D-17 isn't the worst driver.** D-17 tops the raw count only because they drive the most km on a firmware version that logs about 5× more light braking events. Per 100 km of serious events, D-17 ranks 56th of 60. D-49 and D-30 are the real concerns.
+
+The data panel also covers 134 duplicate alerts (the vendor claims each alert is sent once), wrong vendor severity on engine faults, and 52 unplugs outside the vendor's nightly update window.
+
+**Before you submit:**
+- **AI session:** I exported it to `Downloads\session-export-1792172875887.zip`. I didn't commit it because it contains the `ghp_` token pasted earlier, so revoke that token before attaching the zip to the form.
+- **Check the AI-use section of the README.** It credits you with the requirements and says the code was AI-written, and you know best what you did, so edit it if anything's off. Misrepresenting this is the one thing the brief says counts against you.
+- **Reset the demo actions:** `state.json` holds my test escalations. Delete it and restart if you want a clean dashboard.
+- **Deadline:** the Final Submission form closes at 2:40 p.m.
+
+The dashboard is still running at http://localhost:3000.
+
+----- ZACK -----
+operations and safety should not have visibility into maintanence dashboards and likewise. this allows for no confusion. practice best UI/UX practices and provide clean interfaces
+
+follow an iOS 26 and liquid glass theme, extremely simple and clear to use. remove the "data checks what you didnt include section" and take into account all data provided.
+
+the readme must follow this template
+
+"
+# Maple Freight: Zack Telsem
+
+## How to run it
+<!-- The exact commands to run your build from a fresh clone. Anything we need to install? -->
+
+## Tonight's top 3 for Maple Freight
+1. **Item:** … **Why it matters:** … **Evidence from the data:** … **Next action (who, by when):** …
+2. …
+3. …
+
+## What I built, and for whom
+<!-- Who opens this, when, and what can they do with it? -->
+
+## Assumptions I made
+<!-- Anything you decided about the data or the request without being told. -->
+
+## What I deliberately did NOT do (and why)
+
+## How I checked it's correct
+<!-- Tests, checks, recomputations. How do you know your numbers are right? -->
+
+## AI use
+- **Tools I used: Claude Code**
+- **What AI did for me: Built the dashboard, read further into the data to action into the dashboard, set user permissions/visibility, pushed to github**
+- **One thing AI got wrong or incomplete, and how I caught it: Dashboard was initially created and any user could select their role and view extensive amounts of data pointing to confusion.**
+- **Link to / export of my AI session:**
+
+## If I had two more days
+
+* build a cleaner dashboard with less confusion across the board
+* created workflow automations into any other programs that safety/ops/maintanence might use to further ease actioning the alerts
+
+"
+
+----- CLAUDE -----
+I'll split the views by role on the server, so each role only receives its own data. Then I'll rebuild the UI as a sign-in screen followed by one clean liquid-glass view per role, and rewrite the README to your template.
+
+Now the liquid-glass UI, starting with the markup and styles:
+
+Now the app script, with sign-in and a separate, role-specific view for each team:
+
+Quick update: the new liquid-glass UI is written. Next I'll give Maintenance the case details on its work orders, run the tests, and check each role in the browser.
+
+Tests pass. Now restarting the server with a clean state, then checking each role in the browser:
+
+Sign-in looks clean. Fixing three small things: role text alignment, Maintenance's icon letter, and an empty toast peeking at the top.
+
+That looks clean. Now I'll open the V-137 card and send it to maintenance.
+
+Now the README, following your template exactly:
+
+Committed. Pushing to GitHub, since your README says the work was pushed:
+
+The new version is pushed to https://github.com/zackt223/maple. All 14 tests pass, and I clicked through the Ops and Maintenance views in the browser.
+
+**Each team now only sees its own data.** You start by choosing your team, and the server only sends that team's information, so the separation holds even outside the UI:
+- **Operations** sees vehicle issues: a top-10 list for tonight, a backlog, low and medium alerts, and its activity. It can send issues to Maintenance and sees Maintenance's status, ETA and notes on those cases, but never the Maintenance screens.
+- **Safety** sees driver issues: the same layout plus the Drivers ranking.
+- **Maintenance** sees only its work orders, with the evidence and repair history from whoever sent them. It can only approve, set ETAs and add notes, and it can't see the Ops or Safety screens.
+- The server also refuses an action on another team's case; there's a test for that.
+
+**Design:** it now uses the iOS 26 Liquid Glass look:
+- frosted glass panels over a soft colour background
+- a floating tab bar at the bottom and large titles
+- cards that show one next step and expand when tapped
+- colour coding: red critical, orange high, yellow medium, grey low
+
+**Data:** the "Data checks" panel is gone. Its findings now show on the cards themselves as "Keep in mind" notes:
+- late-arriving Hamilton data
+- firmware sensitivity
+- missing posted speed limits
+- Class 8 tractor risk
+- actual readings, such as 96 kPa or 104→118 °C
+
+**README:** it follows your template exactly, with your AI-use and "two more days" text kept as you wrote it. Because the template has no metrics heading, the metrics sit under "What I built".
+
+To finish your submission:
+- **Revoke the `ghp_` token** at github.com/settings/tokens if you haven't. It appears in the session log.
+- **Attach the latest export:** `Downloads\session-export-1792173774833.zip`. It covers this whole session, so use it rather than the earlier zip. I left it out of the public repo because of the token.
+- **Submit the Final Submission form** by 2:40 p.m.
+
+----- ZACK -----
+i want you to include sections for operations to reel in safety team when required along with a note; allows safety team to action any drivers or even advise maintenance on certain safety codes / changes.
+
+safety team should also be able to factor in software updates in regards to the absolute minimum version update that can be operating on vehicles
+
+----- CLAUDE -----
+I'll add three things:
+- an Ops → Safety referral with a note
+- a Safety workspace for referrals and maintenance advisories
+- a firmware minimum-version policy that Safety sets and that turns into update work orders for Maintenance
+
+Server first.
+
+Server done. Now the UI: a Refer to Safety action for Ops, plus From Ops and Firmware tabs for Safety.
+
+The shell mangled the inline script, so I'll write it to a file and run that instead:
+
+Patch applied. Adding tests for the new workflows:
+
+Tests pass. Restarting and clicking through the Ops → Safety referral in the browser:
+
+`can()` was dropped in the earlier rewrite. Restoring it:
+
+The referral worked: "1 to safety", and tonight-actioned went up. Now the Safety side:
+
+Safety receives Ops' note with the evidence and can reply. Now the Firmware tab:
+
+The Firmware tab works: minimum 4.3.0 saved, 24 of 60 vehicles compliant, 36 listed below the minimum. Updating the README and pushing:
+
+The three new workflows are pushed to https://github.com/zackt223/maple and all 16 tests pass. In the browser I checked the Ops → Safety referral end to end and setting the firmware minimum; the advisory and the firmware update requests are covered by the tests.
+
+**Operations can bring in Safety.** Each Ops case has a **Bring in Safety** button, and a note is required (the server refuses one without it). The case then shows "Safety · Open". When Safety replies, or sends the case to Maintenance, that shows up on the Ops case, including the work order's status and ETA.
+
+**Safety has two new tabs:**
+- **From Ops** lists each referral with Ops' note, the suggested steps and the evidence. Safety can:
+  - **Send an update to Ops**, for example to say a driver is being coached.
+  - **Send the case to Maintenance** with a priority from P1 to P3.
+  - **Close** the referral.
+- **Advise maintenance**, at the bottom of the From Ops tab, lets Safety pick any of the 60 vehicles, describe a safety code or change, set a priority, and send it. It lands in Maintenance's queue for approval, labelled as a safety advisory.
+- **Firmware** lets Safety set the minimum telematics version allowed on the road. It shows each version's vehicle count, harsh-braking rate and the vendor's note, and recommends 4.3.0. The 4.2.1 version logs about 5× more light braking, which is part of why D-17 looked like the worst driver.
+  - With 4.3.0 as the minimum, 24 of 60 vehicles comply and 36 fall below it.
+  - One button sends Maintenance one update work order per depot, and it won't create duplicates.
+
+The visibility rules still hold. Ops only sees Safety's replies on its own cases. Maintenance only sees work orders, with labels showing whether a request came from Ops, a Safety advisory or the firmware policy. Firmware and driver data stay Safety-only.
+
+I updated the README's "What I built" and "How I checked it's correct" sections; everything else still follows your template.
+
+**Before you submit:**
+- **Attach the newest export**: `Downloads\session-export-1792174300342.zip`. It covers this whole session, so use it instead of the earlier zips.
+- **Revoke the `ghp_` token** at github.com/settings/tokens if you haven't. It's in that export.
+- **Submit the Final Submission form** by 2:40 p.m.
+
+----- ZACK -----
+[Image attached]
+
+@"C:\Users\zacka\Downloads\Maple_Freight_New_Information\Maple_Freight_New_Information\hamilton_backfill.csv"
+this is a reference as to how the dashboard should look
+
+include business manager / admin as a user that can overlook every single dashboard / metric
+
+new data has been included, as attached
+
+i now would like for you to build the following
+Filter in the three depots as a factor so each alert displays vehicle details, driver details, and the depot accordingly. this being North Yard, Airport Hub and Hamilton Depot. 
+
+This allows Maple Freight teams to operate according to locations set. 
+
+This also now filters in any communication / network failures with new alerts set to locations as communication / network failures, as well as any alerts that came in post-restoral of the network/communication.
+
+----- CLAUDE -----
+Big update with little time left, so I'll go in this order:
+1. Merge in the Hamilton backfill and detect network outages.
+2. Add the depot filter and the Business Manager role.
+3. Restyle to match your reference.
+4. Update the README and push.
+
+First, a look at what the backfill contains:
+
+There's also a `NEW_INFORMATION.pdf`. Reading it before building:
+
+V-108 now ranks #1 and the Hamilton outage #2. Now the admin role and depot data on the server:
+
+Expected failures from the new data. Updating those tests and adding checks for the backfill and admin role:
+
+The depot ID regex was double-escaped. Fixing:
+
+Backend committed. Now the client: depot filter, the Business Manager view, and the restyle to match your reference.
+
+Now the visual restyle: dark smoked glass, a lime accent, and a left sidebar, as in your reference.
+
+The Business Manager overview matches the reference layout, with depot bars and network-affected counts. Quick check of the Ops view filtered to Hamilton:
+
+The Hamilton filter works. Now the README (top 3, new roles, and the required "What changed after the new information" section), then push:
+
+The new build is pushed to https://github.com/zackt223/maple and all 18 tests pass.
+
+**The new data changes tonight's #1.** The Hamilton backfill held **V-108**'s overheat (107 °C) followed by low oil pressure (88 kPa), both critical. It's the same failure pattern as V-137, the vendor marked both MEDIUM, and they only arrived when the gateway reconnected at 6:47 p.m. V-108 is now the top case, and top-3 item #1 says to ground both V-108 and V-137.
+
+What I built:
+- **Network and communication failures:** each depot gets its own outage case. Any alert that arrived more than an hour late counts as held by a communication failure.
+  - Hamilton has a critical "gateway outage: 10 alerts held" case. North Yard has 3 delayed alerts; Airport Hub had none.
+  - Every case or alert that came in late is tagged "Arrived after network restored" or "Arrived late".
+- **Depot filter:** buttons at the top switch between All, North Yard, Airport Hub and Hamilton Depot. Every list follows the choice, and each depot gets its own ranked top 10. Cards show the vehicle, vehicle class, driver and depot.
+- **Business Manager:** a fourth sign-in with a read-only overview of all teams. It shows:
+  - each team's metrics and firmware compliance
+  - cases per depot, with network-affected counts
+  - the most urgent cases across teams
+  - read-only versions of the Ops, Safety and Maintenance screens
+- **Speeding rule I added:** 40 km/h or more over a known posted limit now counts as high. This was prompted by V-126 doing 104 in a 60 zone. Your 115 km/h rule otherwise stays as it was.
+- **Look:** dark smoked glass with a lime accent, a glass sidebar on desktop and a depot switcher at the top, following your reference.
+
+The README now has the required **"What changed after the new information"** section, an updated top 3 and the new Business Manager role. I checked the Business Manager overview and the Hamilton-filtered Ops view in the browser.
+
+**Submit by 2:40 p.m.:**
+- Attach the newest export: `Downloads\session-export-1792174837238.zip`.
+- Revoke the `ghp_` token if you haven't; it appears in the export.
+
+----- ZACK -----
+[Image attached]
+
+include visual graphs, follow the photo's UI as extremely close as possible. the skeleton graphs included. 
+
+Sales or finance also would not be able to look into any maintenance work order costs or be able to audit and cross-check data when quarterly reviews start.
+
+build a sales / finance role with appropriate permissions for each user (view, edit, delete) in order to avoid last-minute issues. add a password screen after user is selected and include a "no password just click enter" in the password entry field
+
+use the image attached as the background for the dashboard
+
+update the readme so it includes the info the what changed after the new info being "
+
+[Pasted content]
+Filtered in the three depots as a factor so each alert displays vehicle details, driver details, and the depot accordingly
+
+This allows Maple Freight teams to operate according to locations set. 
+
+This also now filters in any communication / network failures with new alerts set to locations as communication / network failures, as well as any alerts that came in post-restoral of the network/communication.
+[End of pasted content]
+
+"
+
+the One thing AI got wrong or incomplete, and how you caught it being "There was no user role for business managers / admin in order to overview the entire dashboard along with its metrics. Sales or finance also would not be able to look into any maintenance work order costs or be able to audit and cross-check data when quarterly reviews start.
+
+After reviewing the build, I noticed the lack of it and built a business manager / admin / sales / finance role with appropriate permissions for each user (view, edit, delete) in order to avoid last-minute issues. "
+
+also summarize the tonight's top 3
+
+before completing all of this, validate the data once again.
+
+include an option to view all alerts and filter based on driver details, vehicle details, and yard details.
+
+mention any edge cases that were not mentioned by me, to me.
+
+----- CLAUDE -----
+I'll start by re-validating the data from scratch, so the new work sits on checked numbers.
+
+Now the server: the Finance role, a view/edit/delete permission matrix, work-order costs and the all-alerts endpoint.
+
+Server tests pass. app.js has been patched several times, so I'll re-read it and then rewrite it cleanly with everything new.
+
+I'll put the charts in their own file, `public/charts.js`, as small SVG functions with no libraries:
+
+Now the app.js update: the password step, grouped sidebar, Insights charts, the all-alerts explorer, Finance views, access matrix, and withdraw/delete actions.
+
+A `$'` in the replacement text was treated as a special pattern by `String.replace`. I'll restore app.js from git and re-apply with function replacements.
+
+The git checkout restored the file with Windows (CRLF) line endings, which breaks the match strings. I'll normalize to LF and retry:
+
+Patch applied. Now the styles: truck background, panels, chart styles, table, search and user pill.
+
+Now tests for Finance, the delete/withdraw rules and alert access:
+
+All 21 tests pass. Checking it in the browser:
+
+The password step works over the truck background. Pressing Enter, then opening Insights:
+
+Very close to the reference. Checking All alerts with a driver filter:
+
+22 tests pass, including one that would have caught the ID bug. Now the README. Reading it first:
+
+Getting fresh numbers for the README:
+
+Writing the README updates:
+
+Pushed. One last check of the Finance view:
+
+Everything is pushed to https://github.com/zackt223/maple and all 22 tests pass. In the browser I checked the password screen, Insights, the All alerts driver filter and the Finance overview. The per-role permission rules are covered by the automated tests.
+
+**Data re-validation:** I wrote an independent script, `scratch/validate.js`, that doesn't use the app's code. It confirms:
+- 2,370 + 10 rows with no alert-ID collisions.
+- 134 duplicates, none between the export and the backfill.
+- Every alert matches a known vehicle and its assigned driver.
+- All backfill rows are from Hamilton, received at 6:47 p.m.
+- No alert was received before it happened.
+- The numbers behind the top 3 hold.
+
+**Tonight's top 3:**
+1. **Ground V-108 and V-137.** Both overheated and then lost oil pressure, and the vendor marked both MEDIUM. V-108's alerts were held by Hamilton's outage until 6:47 p.m.
+2. **Five misfires have no work order,** four of them at Hamilton. V-151 is also 2,350 km overdue for service. Hold V-151 and book the others for Tuesday.
+3. **D-17 isn't the worst driver.** The raw count is inflated by mileage and firmware 4.2.1. Coach D-49 and D-30 first.
+
+**What's new:**
+- **Look:** the truck photo is the background, with a grouped glass sidebar, a search bar and a user pill, closely following the CryptoNest layout.
+- **Charts (Insights tab):** the reference's "today" card, an Overview line chart, a hatched "General statistics" chart and a "Relative dominance" polar chart. They follow the depot filter.
+- **All alerts:** a History table of all 2,246 alerts. You can filter by driver, vehicle, vehicle class, firmware, yard, type, priority or date range, or search, 25 per page. It's available to every role except Maintenance.
+- **Password screen:** appears after you pick a user. The field says "No password, just press Enter", and pressing Enter signs in.
+- **Sales & Finance role:** records parts, labour and invoice numbers on work orders, then verifies or flags them, and can export work orders with costs and the audit log as CSV.
+  - The shop data has no cost column, so costs are entered from invoices rather than invented.
+  - Finance can't delete anything; a correction keeps the old amount and resets the review.
+- **View / edit / delete for every role:** shown in an Access tab and enforced by the server.
+  - Ops and Safety can withdraw their own pending requests.
+  - The Business Manager can delete pending work orders or referrals raised in error.
+  - Approved work and shop-system records can never be deleted.
+  - Maintenance never sees costs.
+- **README:** your new-info text and AI-use wording are in as given, plus a short top-3 summary, the permission table and the edge cases.
+
+**Edge cases you hadn't mentioned:**
+- **Work-order IDs could be reused (bug, now fixed).** Deleting a pending request could have let the next request take an existing ID and overwrite that work order. It's fixed and has a test.
+- **Driver numbers don't match vehicle numbers.** D-17 drives **V-142**, and V-117 is driven by D-42.
+- **V-137 went back on the road after it was cleared.** It logged harsh cornering at 10:40 and 11:37, so it may not be parked at the depot now.
+- **Late data can reorder tonight's list.** Hamilton may still be holding alerts, so recheck before 6:00 a.m.
+- **No data isn't the same as no problem.** V-102 has no telematics unit, and an unplugged device looks "quiet".
+- **Real unplugs between 23:00 and midnight are hidden** by the vendor's update-window rule.
+- **The time zone is fixed at UTC−4.** Daylight time ends Nov 1, after which times would be an hour off.
+- **96 engine faults have no reading,** so they can't be trended.
+- **V-158's repair is booked for the same morning as dispatch.**
+- **A 4.3.0 firmware minimum** would make 36 of 60 vehicles non-compliant at once.
+- **Demo security:** anyone on the machine can act as any role, and `state.json` has no backups.
+
+**Before you submit:**
+- Attach the newest export: `Downloads\session-export-1792175632168.zip`.
+- Revoke the `ghp_` token if you haven't; it appears in the export.
+
+----- ZACK -----
+update the readme, keep it straight to the point context filled, no jargon and extras
+
+[Pasted content]
+## How to run it
+<!-- The exact commands to run your build from a fresh clone. Anything we need to install? -->
+
+## Tonight's top 3 for Maple Freight
+1. **Item:** … **Why it matters:** … **Evidence from the data:** … **Next action (who, by when):** …
+2. …
+3. …
+
+## What I built, and for whom
+<!-- a dashboard for business manager, ops, safety team, maintanence team, finance and sales. included a visual graph feature with an export option for pitch decks or presentations. -->
+
+## Assumptions I made
+<!-- All data provided was set, no changes would be needed. No admin/business manager/sales/finance role was required, later realized there must be those roles set. No visual graphs required, this feature along with an export option allows for better use in pitch decks or presentations. -->
+
+## What I deliberately did NOT do (and why)
+<!-- Built workflow automations into different softwares safety/maintanence/ops may use as it is undiscovered/unfeasible in a 90min time frame.  -->
+
+## How I checked it's correct
+<!-- Included the data into the dashboard and reviewed it, actioning alerts and escalating to safety/ops/maintaince teams. Filtered alerts based on driver, vehicle, and yard location. Exported visual graphs into png's and jpegs. Included user permissions and roles, reviewing appropriate data per user.  -->
+
+## AI use
+- **Tools I used:**
+- **What AI did for me:**
+- **One thing AI got wrong or incomplete, and how I caught it:**
+- **Link to / export of my AI session:**
+
+## If I had two more days
+
+## What changed after the new information
+<!-- Filtered in the three depots as a factor so each alert displays vehicle details, driver details, and the depot accordingly
+
+This allows Maple Freight teams to operate according to locations set. 
+
+This also now filters in any communication / network failures with new alerts set to locations as communication / network failures, as well as any alerts that came in post-restoral of the network/communication. -->
+[End of pasted content]
+
+----- CLAUDE -----
+Your new README text describes a chart export to PNG and JPEG for decks. The dashboard doesn't have that yet, so I'll build it first and test it so the README is accurate. Then I'll rewrite the README to your template.
+
+Testing the export in the browser. I'll generate each chart as PNG and JPEG and preview one:
+
+All three charts export as PNG and JPEG, with a title and caption, ready for slides. Removing the preview and writing the README:
+
+I rewrote the README to your template, in plain language with no extra sections, and pushed it to https://github.com/zackt223/maple. Tests still pass (22 of 22).
+
+**One addition so the README is accurate:** your text says the charts can be exported as PNG and JPEG for pitch decks, but the dashboard couldn't do that yet. I built it: each chart on the Insights page now has **PNG** and **JPEG** buttons. The image includes a title, the depot filter and a data-date caption, and is saved at high resolution for slides. I tested all three charts in both formats in the browser, and that's pushed too.
+
+**Two points to check, since the README speaks for you:**
+- **Assumptions:** you wrote "All data provided was set, no changes would be needed." I kept that, and added a short line naming what the dashboard handles: 134 duplicates counted once, fault urgency taken from the fault-code list instead of the vendor label, and Eastern time. Without that line, the assumption contradicts the top 3. Delete it if you'd rather keep your wording alone.
+- **How I checked it's correct:** your list describes checks done by using the dashboard. I tested all of those myself during this session, but the README says "I", so make sure it matches what you actually did. Misrepresenting this is the one thing the brief penalizes.
+
+**Section order:** I followed your template, so "What changed after the new information" is last, with your text plus one sentence explaining why V-108 joined tonight's #1.
+
+**To submit:** attach the newest session export, `Downloads\session-export-1792175765402.zip`, and revoke the `ghp_` token first if you haven't; it appears in that log.
+
+----- ZACK -----
+add a blue to the truck background photo so users can focus better on the dashboard
+
+all edgecases mentioned; provide fixes to except for the demo security with "AI notes" added to each alert
+
+----- CLAUDE -----
+I read "a blue" as **a blur** on the truck photo, so the dashboard stands out. Say if you meant a blue tint and I'll switch it. Now fixing each edge case except demo security, and adding an **AI note** to every alert. First, the current triage engine:
+
+Checking which vehicles have gone quiet, to size the "no data isn't no problem" fix:
+
+The escaping got mangled and nothing was written. Doing these edits directly instead:
+
+Now the server part (data reload, version check, phased firmware), as a script file to avoid shell escaping:
+
+Both failures are expected changes in behaviour. Updating those tests and adding one test per edge-case fix:
+
+Tests pass (23). Now the dashboard side:
+- show the AI note on every alert
+- add a "last data received" line per depot
+- refresh automatically when new data arrives
+- blur the background
+
+Restarting the server and checking it in the browser:
+
+The blurred background, the per-depot "last data received" line and the AI notes all show. Testing auto-refresh by touching a data file without changing it:
+
+Auto-refresh works: touching the file moved the data version from 1 to 2, and the data itself is unchanged. Now short README updates in the same plain style:
+
+All the edge-case fixes, the AI notes and the blurred background are pushed to https://github.com/zackt223/maple. All 23 tests pass, including one for each fix, and I checked the Ops view in the browser.
+
+**Background:** I read "a blue" as **a blur**. The truck photo is now blurred and slightly darkened so the panels stand out. If you meant a blue tint, say so and I'll add it.
+
+**AI notes:** every alert, in every view, has an "AI note" of one or two plain sentences on what it means and what to do. Truthfully, they're written by fixed rules in the code, not by a live AI model; the README says this so the label doesn't mislead anyone. If you want real AI-written notes, that needs an API key.
+
+**Edge-case fixes:**
+
+| Edge case | Fix |
+| --- | --- |
+| Driver and truck numbers don't match (D-17 drives V-142) | The note on those alerts says so |
+| V-137 was used after it was cleared | Its case now starts with "find V-137 now: in use at 10:40 and 11:37". The same check found **V-108 in use at 1:09 p.m. after overheating** |
+| Late data can change tonight's list | Each depot shows when it last sent data. The server reloads when a data file changes, and the page refreshes itself within 30 seconds (tested) |
+| No data isn't the same as no problem | Trucks with no alerts for 36+ hours are flagged: **V-128 and V-110 at Hamilton, V-159 at Airport Hub**. V-102 is excluded because it's out of service |
+| Unplugs in the 11 p.m. update hour were hidden | They now show as low. **V-118 is the only truck that unplugs at that hour, on 11 nights**, so it's flagged high and ranks #5 |
+| Time zone fixed at UTC−4 | Times now follow real Eastern time, including the Nov 1 change (tested) |
+| Engine faults with no reading | The note says the fault can't be tracked over time |
+| Daily maintenance repeats | The note says only the latest value counts |
+| Duplicates | The note says "sent 2 times, counted once" |
+| V-158's repair is the same morning as dispatch | "Hold V-158 from the 6:00 a.m. dispatch" is now on tonight's list. V-151 gets "booked Oct 5, too late, move it up" |
+| Firmware minimum would flag 36 trucks at once | Updates are requested in phases (4.2.1 first) and don't stop trucks from running |
+| Work-order IDs reused after a delete | Already fixed earlier |
+
+The README's top 3 now includes "find the trucks first" and the V-158 hold. "What I built" lists the AI notes and these fixes in plain language.
+
+**Session export:** I hit the limit of 6 exports per hour, so the newest automatic one (`session-export-1792175765402.zip`) is missing this last round. Use the session menu's **Export** to get a complete one, and revoke the `ghp_` token before you share it.
+
+----- ZACK -----
+include in the readme that these were the edge cases that were caught by claude code, and the fixes that were approved / sent
+
+* Work-order IDs could be reused (bug, now fixed). Deleting a pending request could have let the next request take an existing ID and overwrite that work order. It’s fixed and has a test.
+* Driver numbers don’t match vehicle numbers. D-17 drives V-142, and V-117 is driven by D-42.
+* V-137 went back on the road after it was cleared. It logged harsh cornering at 10:40 and 11:37, so it may not be parked at the depot now.
+* Late data can reorder tonight’s list. Hamilton may still be holding alerts, so recheck before 6:00 a.m.
+* No data isn’t the same as no problem. V-102 has no telematics unit, and an unplugged device looks “quiet”.
+* Real unplugs between 23:00 and midnight are hidden by the vendor’s update-window rule.
+* The time zone is fixed at UTC−4. Daylight time ends Nov 1, after which times would be an hour off.
+* 96 engine faults have no reading, so they can’t be trended.
+* V-158’s repair is booked for the same morning as dispatch.
+* A 4.3.0 firmware minimum would make 36 of 60 vehicles non-compliant at once.
+
+also send to me here anything you got wrong / incomplete that I caught and advised you to build/change.
+
+after doing so, do a quick review check for any bugs / errors and send a quick final fix and push to main. 
+
+then do a /export of this entire session
+
+----- CLAUDE -----
+I'll do the bug review first, so the README describes the final state. Starting with a smoke test of every role and endpoint:
+
+The guard landed in the wrong function, because the same line exists in two places. Moving it:
+
+All 24 tests pass. Now the README: the edge-case table goes under **AI use**, and the duplicate list in "What I built" becomes a single pointer.
+
+Quick browser check of the fixes, then commit and push:
+
+All three fixes work. One leftover: the P1/P2/P3 picker still shows on network cards with nothing to use it for. Hiding it, then pushing:
+
+Everything is pushed to main, and all 24 tests pass.
+
+**README:** under **AI use** there's now a table, "Edge cases Claude Code caught, and the fixes I approved". It lists all ten edge cases from your message, each with the fix that shipped, plus one more from the final review. The duplicate list in "What I built" is now a one-line pointer to the table.
+
+**Final review: what I found and fixed.** I tested every role and endpoint and tried bad inputs. Four problems turned up:
+- **A real bug:** Ops could "send to maintenance" a network outage or a not-reporting case. That created a meaningless work order for "20 vehicles". It's now blocked in the server and the button is hidden. There's a test.
+- **Background photo:** `bg.jpg` was served with the wrong file type. It's now sent as an image.
+- **Saved depot:** a tampered saved depot could put arbitrary text on the page. It's now ignored unless it's one of the three depots.
+- **"Not reporting" cards** said "0 h ago"; they now say "no alerts for 36+ h".
+
+Two pages already guard against the rest. Path tricks like `/../src/server.js` return 404, and a broken request returns an error instead of crashing.
+
+**Things I got wrong or left out that you caught and asked me to change:**
+1. **Anyone could see everything.** My first dashboard let any user switch roles from a toggle and see every team's data. You asked for separate team views and sign-in.
+2. **The first UI wasn't what you asked for.** It wasn't the iOS 26 Liquid Glass look, and it had a cluttered "Data checks" panel. You asked for a simpler, cleaner design.
+3. **The README didn't follow the template.** It had a different title and extra sections, and later it was too long and full of jargon. You gave me the template and asked for plain language.
+4. **No way for teams to work together.** Ops couldn't bring Safety in with a note, Safety couldn't advise Maintenance, and there was no minimum firmware policy.
+5. **No Business Manager or admin role** to oversee every dashboard and metric.
+6. **No depot-level view.** I'd found Hamilton's delays but didn't build a depot filter or per-depot network-failure tracking until you asked, after the new information.
+7. **No charts and no reference-style design.** I didn't match your reference image or use the truck background until you asked.
+8. **Finance and access control were missing.** There was no Sales & Finance role, no work-order costs, no view/edit/delete permissions and no password screen.
+9. **No all-alerts view** with driver, vehicle and yard filters.
+10. **I listed edge cases without fixing them,** and there were no per-alert notes, until you asked for fixes and AI notes.
+11. **The background made the panels hard to read,** until you asked for the blur.
+
+**Session export:** I couldn't export, because the app allows 6 exports per hour and this session has used them. To export the full session, open the session menu in the Claude app and choose **Export**; it saves a zip to Downloads. The most recent automatic export (`Downloads\session-export-1792175765402.zip`) is missing the last few rounds, so use the new one. It also contains the `ghp_` token from earlier, so revoke that token before you share the zip.
+
+----- ZACK -----
+confirm the dashboard is able to be viewed in github.io as html
+
+----- CLAUDE -----
+I'll check whether GitHub Pages is set up for the repo, and whether the dashboard could run there as it's built.
+
+I'll split the server into a shared `core.js`, a thin Node wrapper, and a browser build. Doing the split with a script so the logic moves over unchanged:
+
+The split kept the logic identical: all 24 tests still pass against the new `core.js`. Now the GitHub Pages build script and the in-browser stand-in for the server:
+
+Built. To test it like github.io, I'll serve `docs/` from a static-only server (no `/api`, under a `/maple/` path) and open it in the browser:
+
+Everything renders on the static host: the background, glass panels, charts and export buttons. Cleaning up the test helpers, adding the link to the README, and pushing:
+
+The static build is pushed. One step is left: **turning GitHub Pages on** for the repo. It's a repository setting, so I'll check with you first.
+
+Pages is enabled. Waiting for the first deploy to finish:
+
+Live. Opening the real github.io URL and running the same checks there:
+
+The dashboard is live at **https://zackt223.github.io/maple/**. I opened that URL in the browser: every file loads, sign-in works, and the Safety view shows its ranked list and sidebar with no console errors.
+
+At first it couldn't be viewed there. Pages was switched off, and the dashboard needed its Node server, which GitHub Pages can't run. Two changes fixed that:
+- **Shared rules file:** the team permissions, visibility and actions now live in one file, `src/core.js`. `npm start` uses it on the server, and the online copy runs it in the browser, so both behave the same.
+- **Online build:** `npm run build:pages` builds the static copy into `docs/`. I enabled Pages from `main` → `/docs` with your OK.
+
+Before deploying, I tested the static copy on a server with no backend. Sign-in, escalating a case and the Maintenance queue all worked, and Ops was blocked from approving. All 24 tests still pass, and everything is pushed.
+
+**What the online copy can't do:**
+- **No shared board:** each browser keeps its own escalations, notes and costs, so a Safety Manager on another computer won't see your Ops escalations. A shared live board still needs `npm start`.
+- **Not secure:** anyone with the link can open the dashboard and pick any role, and it has no real passwords. That's fine for a demo of synthetic data, not for real company data.
+- **No auto-update:** after changing anything in `data/` or `public/`, run `npm run build:pages` and push to update it. The README says this under "How to run it".
+
+----- ZACK -----
+export all my prompts and outputs into a text file in the repo and advise me which path it is in 
+
+update readme to show the two ways to preview the build, through github pages and through running it on a local host (recommend the best version)
+
+----- CLAUDE -----
+I'll find this session's transcript on disk and pull out just your prompts and my replies.
+
+The first few prompts look like they were saved under the earlier scratch folder before the session moved. Checking:

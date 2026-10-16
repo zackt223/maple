@@ -2,6 +2,10 @@
 
 ## How to run it
 
+There are two ways to see the build.
+
+**Option 1: run it on your computer (recommended).** This is the full version. Everyone using the same computer or network shares one live board: an escalation from Operations shows up for Maintenance. It also picks up new data files on its own, and the server checks every permission.
+
 Install **Node.js 18 or newer**. Nothing else is needed: no packages, no API keys.
 
 ```bash
@@ -12,8 +16,6 @@ npm start
 
 Open http://localhost:3000, pick a user, and press **Enter** on the password screen (no password is set).
 
-**View online (no install):** https://zackt223.github.io/maple/. This copy runs entirely in the browser, and each browser keeps its own escalations, notes and costs. For a team sharing one live board, use `npm start`. After changing anything in `data/` or `public/`, run `npm run build:pages` and commit `docs/` to update the online copy.
-
 Optional:
 
 ```bash
@@ -22,6 +24,8 @@ npm test         # 24 automated checks
 ```
 
 To clear all escalations, notes and costs, delete `state.json` and restart.
+
+**Option 2: view it online on GitHub Pages (quickest, nothing to install).** Open https://zackt223.github.io/maple/. It looks and works the same, but it runs entirely in your browser, so each browser keeps its own escalations, notes and costs, and other people won't see them. Use it for a quick look or a demo. After changing anything in `data/` or `public/`, run `npm run build:pages` and push `docs/` to update it.
 
 ## Tonight's top 3 for Maple Freight
 
@@ -89,7 +93,7 @@ The truck photo in the background is blurred so the dashboard is easy to read.
 - **Tools I used:** Claude Code
 - **What AI did for me:** Built the dashboard, read further into the data to action into the dashboard, set user permissions/visibility, pushed to GitHub.
 - **One thing AI got wrong or incomplete, and how I caught it:** There was no user role for business managers / admin to oversee the entire dashboard and its metrics. Sales or finance also could not look into maintenance work order costs, or audit and cross-check data when quarterly reviews start. After reviewing the build, I noticed the gap and built business manager / admin / sales / finance roles with appropriate permissions for each user (view, edit, delete) to avoid last-minute issues.
-- **Link to / export of my AI session:** Exported from the Claude desktop app and submitted with the Final Submission form. It's not in this public repo because the session log contains a credential that was revoked.
+- **Link to / export of my AI session:** [`ai-session/prompts-and-outputs.txt`](ai-session/prompts-and-outputs.txt): every prompt I sent and every written reply from Claude Code, in order. Email addresses and tokens are redacted. The full export from the Claude app was also submitted with the Final Submission form.
 
 ### Edge cases Claude Code caught, and the fixes I approved
 
