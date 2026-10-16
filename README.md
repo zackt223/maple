@@ -20,7 +20,7 @@ Optional:
 
 ```bash
 npm run report   # tonight's top 10 in the terminal
-npm test         # 24 automated checks
+npm test         # 25 automated checks
 ```
 
 To clear all escalations, notes and costs, delete `state.json` and restart.
@@ -35,14 +35,14 @@ To clear all escalations, notes and costs, delete `state.json` and restart.
    **Next action (who, by when):** Operations first confirms where both trucks are: V-137 was in use at 10:40 and 11:37 a.m. after being cleared, and V-108 at 1:09 p.m. after overheating. The Maintenance Lead then tags out both trucks tonight and checks cooling and oil before they move. The Operations Manager assigns spare trucks for drivers D-08 and D-37 before 6:00 a.m.
 
 2. **Item:** Five trucks with engine misfires (P0300) have no work order: V-151, V-113, V-126, V-131 and V-111.
-   **Why it matters:** A misfire should be inspected within 24 hours. These have been running for 2 to 12 days.
+   **Why it matters:** A misfire should be inspected within 24 hours. These have been running for 1 to 12 days.
    **Evidence from the data:** 8 trucks logged a misfire; only 3 have work orders. 4 of the 5 without one are at Hamilton, where alerts reach the office up to 30 hours late. V-151 is also 2,350 km overdue for service, and its service isn't booked until Oct 5.
    **Next action (who, by when):** The Operations Manager sends all five to Maintenance tonight. V-151 is held from dispatch and its service moved up; the other four are inspected on Tuesday, Sep 22. V-158, which also has a misfire, is held at 6:00 a.m. because its repair is booked for the same morning.
 
-3. **Item:** D-17 is not the worst driver. Coach **D-49** and **D-30** first.
+3. **Item:** D-17 is not the worst driver. Coach **D-31**, **D-20** and **D-49** first.
    **Why it matters:** Coaching the wrong driver wastes time and leaves the risky ones on the road.
-   **Evidence from the data:** D-17 has the most alerts (81) because D-17 drives the most (3,650 km) on device software version 4.2.1, which logs about 5 times more light braking than the other versions. Counting only serious events (hard braking or over 115 km/h) per 100 km driven, D-17 ranks 56th of 60. D-49 and D-30 each had 8 serious events, with braking up to 0.74 g.
-   **Next action (who, by when):** The Safety Manager reviews camera footage and coaches D-49 and D-30 this week.
+   **Evidence from the data:** D-17 has the most alerts (81) because D-17 drives the most (3,650 km) on device software version 4.2.1, which logs about 5 times more light braking than the other versions. Counting only serious events (braking at 0.6 g or more, or over 115 km/h) per 100 km driven, D-17 ranks 56th of 60. The top three are D-31 (7 serious events in 1,495 km, including 131 km/h), D-20 (5 in 1,428 km, braking up to 0.77 g) and D-49 (8 in 2,272 km). All three run the older, less sensitive software, so their numbers aren't inflated.
+   **Next action (who, by when):** The Safety Manager reviews camera footage and coaches D-31, D-20 and D-49 this week, starting with D-31 (Hamilton), whose latest speeding was today.
 
 ## What I built, and for whom
 
@@ -59,6 +59,11 @@ Every view can be narrowed to **North Yard**, **Airport Hub** or **Hamilton Depo
 Charts show daily alert trends and can be **exported as PNG or JPEG** for pitch decks and presentations.
 
 Alerts are colour-coded: red = critical, orange = high, yellow = medium, grey = low.
+
+Each team sees three numbers at the top of its page:
+- **Actions taken:** escalations, approvals, notes and resolutions.
+- **Resolved here (main measure):** high and critical issues closed through the dashboard.
+- **Tonight actioned (warning check):** turns red when more high and critical issues were sent than the team has acted on.
 
 Every alert has an **AI note**: one or two plain sentences on what it means and what to do. The notes are written by fixed rules in the code, not by a live AI service, so they need no API key and always give the same answer.
 
@@ -87,7 +92,7 @@ The truck photo in the background is blurred so the dashboard is easy to read.
 - Filtered alerts by driver, vehicle and yard.
 - Exported the charts as PNG and JPEG.
 - Signed in as each user to confirm they only see and change what they should.
-- Re-checked the numbers with a separate script (`scratch/validate.js`) and 24 automated tests (`npm test`), including one for each edge case listed under AI use.
+- Re-checked the numbers with a separate script (`scratch/validate.js`) and 25 automated tests (`npm test`), including one for each edge case listed under AI use.
 
 ## AI use
 - **Tools I used:** Claude Code

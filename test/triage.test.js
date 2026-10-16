@@ -238,3 +238,13 @@ test('network and reporting cases cannot be sent to the maintenance shop', () =>
   const silent = r.cases.find((c) => c.kind === 'silent');
   assert.equal(handleAction(USERS['ops.manager'], { action: 'escalate', caseId: silent.id })[0], 400);
 });
+
+test('late data: each depot shows when it last sent data, and new data bumps the version the page checks', () => {
+  assert.equal(r.quality.lastReceived['Hamilton Depot'], '2026-09-21 18:47', 'Hamilton backfill arrival');
+  const { createCore } = require('../src/core');
+  const core = createCore({ triage: r, loadState: () => null, saveState: () => {} });
+  const v = core.version;
+  core.setTriage(run());
+  assert.equal(core.version, v + 1, 'page sees a new version and refreshes');
+  assert.ok(core.apiData(USERS['ops.manager']).lastReceived, 'freshness is sent to the page');
+});
