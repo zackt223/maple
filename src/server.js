@@ -14,14 +14,25 @@ const USERS = {
   'safety.manager': { name: 'Safety Manager',     role: 'safety' },
   'maint.lead':     { name: 'Maintenance Lead',   role: 'maintenance' },
   'biz.admin':      { name: 'Business Manager',   role: 'admin' },
+  'finance.lead':   { name: 'Sales & Finance',    role: 'finance' },
 };
 
 // What each role may do. Checked server-side; the UI only hides buttons for convenience.
 const PERMISSIONS = {
-  operations:  ['escalate', 'resolve', 'case_note', 'refer_safety'],
-  safety:      ['escalate', 'resolve', 'case_note', 'referral_note', 'close_referral', 'advise_maintenance', 'set_min_firmware', 'request_firmware_update'],
+  operations:  ['escalate', 'resolve', 'case_note', 'refer_safety', 'withdraw_wo'],
+  safety:      ['escalate', 'resolve', 'case_note', 'referral_note', 'close_referral', 'advise_maintenance', 'set_min_firmware', 'request_firmware_update', 'withdraw_wo'],
   maintenance: ['approve_wo', 'set_eta', 'wo_note'],
-  admin:       [], // oversees every dashboard and metric, read-only
+  finance:     ['record_cost', 'review_cost', 'audit_note'],
+  admin:       ['delete_wo', 'delete_referral'], // oversees everything; can only remove items raised in error
+};
+
+// The same rules as a human-readable view / edit / delete matrix (shown in the app and README).
+const ACCESS = {
+  operations:  { view: 'Ops cases (vehicle, device, network), low & medium ops alerts, all alerts, its own activity', edit: 'Send to maintenance, bring in Safety, notes, resolve', delete: 'Withdraw its own maintenance request while still pending approval' },
+  safety:      { view: 'Driver cases, referrals from Ops, firmware policy, drivers, all alerts, its own activity', edit: 'Coach/act on drivers, reply to Ops, advise maintenance, set minimum firmware, request updates', delete: 'Withdraw its own maintenance request while still pending approval' },
+  maintenance: { view: 'Work-order queue only (with the evidence Ops/Safety sent)', edit: 'Approve work orders, set estimated completion, add notes', delete: 'None' },
+  finance:     { view: 'Every work order with costs, cost totals by depot, all alerts, full audit log', edit: 'Record work-order costs (parts, labour, invoice #), verify or flag a cost, add audit notes', delete: 'None. Costs are corrected by re-recording, and every change is kept in the audit log' },
+  admin:       { view: 'Every team dashboard, every metric, costs, all alerts, full audit log', edit: 'None (oversight only)', delete: 'Remove a work order or referral raised in error while pending' },
 };
 
 // Vendor notes on each firmware release (vendor_notes.md) plus what the data showed.
@@ -32,22 +43,29 @@ const FIRMWARE_NOTES = {
 };
 
 const triage = run();
-const emptyState = () => ({ cases: {}, workOrders: {}, referrals: {}, policy: { minFirmware: null }, log: [] });
+const emptyState = () => ({ cases: {}, workOrders: {}, referrals: {}, costs: {}, policy: { minFirmware: null }, log: [] });
 let state = fs.existsSync(STATE_FILE) ? { ...emptyState(), ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) } : emptyState();
 const save = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
 // What each role is allowed to SEE. Other roles' dashboards are never sent to the browser.
 // Operations owns vehicle availability; Safety owns driver behaviour (plus cases Ops refers to it);
 // Maintenance only sees its work-order queue.
-const CASE_TEAMS = { operations: ['operations', 'maintenance'], safety: ['safety'], maintenance: [], admin: [] };
-const ALERT_TEAMS = { operations: ['operations'], safety: ['safety'], maintenance: [], admin: [] };
+const CASE_TEAMS = { operations: ['operations', 'maintenance'], safety: ['safety'], maintenance: [], admin: [], finance: [] };
+const ALERT_TEAMS = { operations: ['operations'], safety: ['safety'], maintenance: [], admin: [], finance: [] };
+const SEES_ALL_ALERTS = ['operations', 'safety', 'finance', 'admin'];
 const depotOf = Object.fromEntries(triage.vehicles.map((v) => [v.vehicle_id, v.depot]));
 const referralFor = (caseId) => Object.entries(state.referrals).find(([, r]) => r.caseId === caseId);
 const canSeeCase = (role, c) => CASE_TEAMS[role].includes(c.team) || (role === 'safety' && !!referralFor(c.id));
 const teamOf = (type) => (['speeding', 'harsh_braking', 'harsh_accel', 'harsh_cornering'].includes(type) ? 'safety' : 'operations');
 
 const verNum = (v) => v.split('.').reduce((n, p) => n * 1000 + +p, 0);
-const nextId = (prefix, obj) => prefix + String(Object.keys(obj).filter((k) => k.startsWith(prefix)).length + 1).padStart(3, '0');
+// Next free id after the highest ever issued, so a deleted id is never reused (counting keys would overwrite).
+const nextId = (prefix, obj) => {
+  state.seq ||= {};
+  const used = Object.keys(obj).filter((k) => k.startsWith(prefix)).map((k) => +k.slice(prefix.length));
+  state.seq[prefix] = Math.max(state.seq[prefix] || 0, ...used) + 1;
+  return prefix + String(state.seq[prefix]).padStart(3, '0');
+};
 
 function caseSummary(c) {
   return { title: c.title, priority: c.priority, vehicle: c.vehicle, driver: c.driver, depot: c.depot, actions: c.actions, evidence: c.evidence.slice(0, 5), history: c.history || [], context: c.context || [] };
@@ -138,17 +156,22 @@ function metrics(role, cases, workOrders) {
 function apiData(user) {
   if (!user) return { users: USERS };
   const role = user.role;
-  const base = { generatedFor: triage.generatedFor, rules: triage.rules, user: { ...user }, permissions: PERMISSIONS[role] };
+  const base = { generatedFor: triage.generatedFor, rules: triage.rules, user: { ...user }, permissions: PERMISSIONS[role], access: ACCESS[role], series: triage.series, depots: triage.depots, canSeeAllAlerts: SEES_ALL_ALERTS.includes(role) };
   const log = state.log.filter((l) => (l.visibleTo || [l.role]).includes(role)).slice(-50).reverse();
   if (role === 'maintenance') {
     const workOrders = allWorkOrders();
     return { ...base, workOrders, log, metrics: metrics(role, [], workOrders) };
   }
+  if (role === 'finance') {
+    const workOrders = withCosts(allWorkOrders());
+    return { ...base, workOrders, finance: financeSummary(workOrders), log: state.log.slice(-200).reverse(), counts: triage.counts };
+  }
   if (role === 'admin') {
-    // Business Manager: every team's dashboard and metrics, read-only.
+    // Business Manager: every team's dashboard and metrics.
     const teams = {};
     for (const r of ['operations', 'safety', 'maintenance']) teams[r] = apiData(Object.values(USERS).find((u) => u.role === r));
-    return { ...base, teams, log: state.log.slice(-80).reverse(), depots: triage.depots, quality: triage.quality, counts: triage.counts };
+    const workOrders = withCosts(allWorkOrders());
+    return { ...base, teams, workOrders, finance: financeSummary(workOrders), access: ACCESS, allAccess: true, log: state.log.slice(-200).reverse(), quality: triage.quality, counts: triage.counts, referralsAll: referrals() };
   }
   const cases = scopedCases(role);
   const out = { ...base, cases, lowMedium: triage.lowMedium.filter((a) => ALERT_TEAMS[role].includes(teamOf(a.type))), log, metrics: metrics(role, cases) };
@@ -159,6 +182,22 @@ function apiData(user) {
     out.vehicles = triage.vehicles.map((v) => ({ id: v.vehicle_id, depot: v.depot, driver: v.assigned_driver, firmware: v.device_firmware, cls: v.vehicle_class }));
   }
   return out;
+}
+
+function withCosts(wos) {
+  return wos.map((w) => ({ ...w, cost: state.costs[w.wo_id] || null }));
+}
+
+function financeSummary(wos) {
+  const recorded = wos.filter((w) => w.cost);
+  const total = recorded.reduce((n, w) => n + w.cost.total, 0);
+  const byDepot = {};
+  for (const w of recorded) byDepot[w.depot || 'Unassigned'] = (byDepot[w.depot || 'Unassigned'] || 0) + w.cost.total;
+  return {
+    total, recorded: recorded.length, missing: wos.filter((w) => !w.cost && w.status !== 'Pending approval').length,
+    verified: recorded.filter((w) => w.cost.review === 'Verified').length, flagged: recorded.filter((w) => w.cost.review === 'Flagged').length,
+    byDepot, workOrders: wos.length,
+  };
 }
 
 function handleAction(user, body) {
@@ -215,6 +254,41 @@ function handleAction(user, body) {
         entry.detail = body.note;
       }
     }
+  } else if (action === 'record_cost' || action === 'review_cost') {
+    const wo = allWorkOrders().find((w) => w.wo_id === body.woId);
+    if (!wo) return [404, { error: 'Unknown work order' }];
+    entry.target = wo.wo_id; entry.visibleTo = ['finance', 'admin'];
+    if (action === 'record_cost') {
+      const parts = Number(body.parts), hours = Number(body.labourHours), rate = Number(body.labourRate);
+      if (![parts, hours, rate].every((n) => Number.isFinite(n) && n >= 0)) return [400, { error: 'Parts, labour hours and rate must be numbers of 0 or more' }];
+      const prev = state.costs[wo.wo_id];
+      state.costs[wo.wo_id] = { parts, labourHours: hours, labourRate: rate, total: +(parts + hours * rate).toFixed(2), invoice: String(body.invoice || '').slice(0, 40), review: 'Unreviewed', by: user.name, at, history: [...(prev?.history || []), ...(prev ? [{ total: prev.total, at: prev.at, by: prev.by }] : [])] };
+      entry.detail = `${state.costs[wo.wo_id].total.toFixed(2)}${prev ? ` (was ${prev.total.toFixed(2)})` : ''}`;
+    } else {
+      const c = state.costs[wo.wo_id];
+      if (!c) return [409, { error: 'Record a cost before reviewing it' }];
+      if (!['Verified', 'Flagged'].includes(body.review)) return [400, { error: 'Review must be Verified or Flagged' }];
+      c.review = body.review; c.reviewNote = body.note || ''; c.reviewedBy = user.name;
+      entry.detail = body.review + (body.note ? ': ' + body.note : '');
+    }
+  } else if (action === 'audit_note') {
+    if (!body.note) return [400, { error: 'Note is empty' }];
+    entry.target = body.target || 'audit'; entry.detail = body.note; entry.visibleTo = ['finance', 'admin'];
+  } else if (action === 'withdraw_wo' || action === 'delete_wo') {
+    const w = state.workOrders[body.woId];
+    if (!w || w.source !== 'dashboard') return [404, { error: 'Only work orders raised in this dashboard can be removed' }];
+    if (w.status !== 'Pending approval') return [409, { error: `${body.woId} is already ${w.status}; ask Maintenance instead` }];
+    if (action === 'withdraw_wo' && w.requestedRole !== role) return [403, { error: 'You can only withdraw your own requests' }];
+    delete state.workOrders[body.woId];
+    for (const cs of Object.values(state.cases)) if (cs.workOrder === body.woId) { delete cs.workOrder; cs.status = 'acknowledged'; }
+    for (const r of Object.values(state.referrals)) if (r.workOrder === body.woId) r.workOrder = null;
+    entry.target = body.woId; entry.detail = body.note || 'Removed while pending'; entry.visibleTo = ['operations', 'safety', 'maintenance', 'finance', 'admin'];
+  } else if (action === 'delete_referral') {
+    const r = state.referrals[body.referralId];
+    if (!r) return [404, { error: 'Unknown referral' }];
+    if (r.status !== 'Open') return [409, { error: 'Only open referrals can be removed' }];
+    delete state.referrals[body.referralId];
+    entry.target = body.referralId; entry.detail = body.note || 'Removed (raised in error)'; entry.visibleTo = ['operations', 'safety', 'admin'];
   } else if (['referral_note', 'close_referral'].includes(action)) {
     const r = state.referrals[body.referralId];
     if (!r) return [404, { error: 'Unknown referral' }];
@@ -281,6 +355,7 @@ function handleAction(user, body) {
       entry.detail = body.note;
     }
   }
+  entry.visibleTo = [...new Set([...entry.visibleTo, 'admin', 'finance'])];
   state.log.push(entry);
   save();
   return [200, apiData(user)];
@@ -291,6 +366,11 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 const server = http.createServer((req, res) => {
   const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
   if (req.url === '/api/data') return send(200, apiData(USERS[req.headers['x-user']]));
+  if (req.url === '/api/alerts') {
+    const u = USERS[req.headers['x-user']];
+    if (!u || !SEES_ALL_ALERTS.includes(u.role)) return send(403, { error: 'Not available for this role' });
+    return send(200, triage.allAlerts);
+  }
   if (req.url === '/api/action' && req.method === 'POST') {
     const user = USERS[req.headers['x-user']];
     if (!user) return send(401, { error: 'Sign in first' });
@@ -311,4 +391,4 @@ const server = http.createServer((req, res) => {
 if (require.main === module) {
   server.listen(PORT, () => console.log(`Maple Freight triage dashboard → http://localhost:${PORT}`));
 }
-module.exports = { handleAction, apiData, USERS, PERMISSIONS, server };
+module.exports = { handleAction, apiData, USERS, PERMISSIONS, ACCESS, server };

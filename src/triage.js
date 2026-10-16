@@ -382,7 +382,26 @@ function run() {
   const cases = buildCases(alerts, ctx);
   const counts = {};
   for (const a of alerts) counts[a.priority] = (counts[a.priority] || 0) + 1;
+  // Daily series (Eastern dates) for the charts.
+  const days = {};
+  for (const a of alerts) {
+    const d = a.local.slice(0, 10);
+    const o = days[d] ||= { day: d, total: 0, highCritical: 0, critical: 0, late: 0, byDepot: {}, byType: {} };
+    o.total++;
+    if (['high', 'critical'].includes(a.priority)) o.highCritical++;
+    if (a.priority === 'critical') o.critical++;
+    if (a.lagMin > RULES.lateMinutes) o.late++;
+    o.byDepot[a.depot] = (o.byDepot[a.depot] || 0) + 1;
+    o.byType[a.alert_type] = (o.byType[a.alert_type] || 0) + 1;
+  }
+  const series = Object.values(days).sort((x, y) => x.day.localeCompare(y.day));
+  const allAlerts = alerts.map((a) => {
+    const v = ctx.vehicleById[a.vehicle_id];
+    return { id: a.alert_id, type: a.alert_type, priority: a.priority, vendor: a.vendor_severity, when: a.local, vehicle: a.vehicle_id, vehicleClass: v.vehicle_class, firmware: v.device_firmware,
+      driver: a.driver_id, depot: a.depot, reason: a.reason, value: a.value, unit: a.unit, dtc: a.dtc_code, lateH: a.lagMin > RULES.lateMinutes ? +(a.lagMin / 60).toFixed(1) : 0, backfill: !!a.backfill, wo: a.wo?.note || '' };
+  }).sort((x, y) => y.when.localeCompare(x.when));
   return {
+    series, allAlerts,
     generatedFor: 'Mon Sep 21 2026, 6:47 p.m. ET (incl. Hamilton backfill)',
     rules: RULES,
     counts,

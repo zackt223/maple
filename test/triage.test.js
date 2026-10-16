@@ -154,3 +154,58 @@ test('business manager sees every team, read-only', () => {
   assert.ok(admin.teams.operations.cases && admin.teams.safety.drivers && admin.teams.maintenance.workOrders);
   assert.equal(handleAction(USERS['biz.admin'], { action: 'case_note', caseId: r.cases[0].id, note: 'x' })[0], 403);
 });
+
+test('finance records and reviews costs; others cannot; maintenance never sees costs', () => {
+  const fin = USERS['finance.lead'];
+  const wo = apiData(fin).workOrders.find((w) => w.wo_id === 'WO-5540');
+  assert.equal(wo.cost, null, 'no costs in the shop export');
+  assert.equal(handleAction(USERS['ops.manager'], { action: 'record_cost', woId: 'WO-5540', parts: 80, labourHours: 1.5, labourRate: 120 })[0], 403);
+  assert.equal(handleAction(fin, { action: 'record_cost', woId: 'WO-5540', parts: -1, labourHours: 1, labourRate: 1 })[0], 400);
+  assert.equal(handleAction(fin, { action: 'record_cost', woId: 'WO-5540', parts: 80, labourHours: 1.5, labourRate: 120, invoice: 'INV-1' })[0], 200);
+  assert.equal(apiData(fin).workOrders.find((w) => w.wo_id === 'WO-5540').cost.total, 260);
+  assert.equal(handleAction(fin, { action: 'review_cost', woId: 'WO-5540', review: 'Verified' })[0], 200);
+  assert.equal(handleAction(fin, { action: 'record_cost', woId: 'WO-5540', parts: 100, labourHours: 1.5, labourRate: 120 })[0], 200);
+  const c = apiData(fin).workOrders.find((w) => w.wo_id === 'WO-5540').cost;
+  assert.equal(c.history[0].total, 260, 'corrections keep history');
+  assert.equal(c.review, 'Unreviewed', 'a corrected cost must be re-reviewed');
+  assert.ok(apiData(USERS['maint.lead']).workOrders.every((w) => !('cost' in w)));
+  assert.equal(handleAction(fin, { action: 'escalate', caseId: r.cases[0].id })[0], 403);
+  assert.ok(apiData(USERS['biz.admin']).finance.total > 0, 'business manager sees costs');
+});
+
+test('delete rules: withdraw own pending request only; admin removes items raised in error', () => {
+  const ops = USERS['ops.manager'], safety = USERS['safety.manager'], admin = USERS['biz.admin'];
+  const c = apiData(ops).cases.find((x) => x.kind === 'engine' && !x.state);
+  handleAction(ops, { action: 'escalate', caseId: c.id, priority: 'P2' });
+  const woId = apiData(ops).cases.find((x) => x.id === c.id).linkedWo.id;
+  assert.equal(handleAction(safety, { action: 'withdraw_wo', woId })[0], 403, "can't withdraw another team's request");
+  assert.equal(handleAction(ops, { action: 'withdraw_wo', woId })[0], 200);
+  assert.equal(apiData(ops).cases.find((x) => x.id === c.id).linkedWo, null);
+  handleAction(ops, { action: 'escalate', caseId: c.id, priority: 'P2' });
+  const wo2 = apiData(ops).cases.find((x) => x.id === c.id).linkedWo.id;
+  handleAction(USERS['maint.lead'], { action: 'approve_wo', woId: wo2 });
+  assert.equal(handleAction(admin, { action: 'delete_wo', woId: wo2 })[0], 409, 'approved work is not deleted');
+  assert.equal(handleAction(admin, { action: 'delete_wo', woId: 'WO-5540' })[0], 404, 'shop records are never deleted');
+  assert.equal(handleAction(USERS['maint.lead'], { action: 'delete_wo', woId: wo2 })[0], 403);
+});
+
+test('all-alerts explorer is available to ops, safety, finance and admin only', () => {
+  for (const u of ['ops.manager', 'safety.manager', 'finance.lead', 'biz.admin']) assert.equal(apiData(USERS[u]).canSeeAllAlerts, true, u);
+  assert.equal(apiData(USERS['maint.lead']).canSeeAllAlerts, false);
+  assert.equal(r.allAlerts.length, 2246);
+  assert.ok(r.allAlerts.every((a) => a.vehicleClass && a.firmware && a.driver && a.depot), 'every alert carries vehicle, driver and yard details');
+});
+
+test('ids are never reused after a delete', () => {
+  const ops = USERS['ops.manager'];
+  const [a, b] = apiData(ops).cases.filter((x) => x.kind === 'engine' && !x.state?.workOrder).slice(0, 2);
+  handleAction(ops, { action: 'escalate', caseId: a.id });
+  handleAction(ops, { action: 'escalate', caseId: b.id });
+  const idA = apiData(ops).cases.find((x) => x.id === a.id).linkedWo.id;
+  const idB = apiData(ops).cases.find((x) => x.id === b.id).linkedWo.id;
+  handleAction(ops, { action: 'withdraw_wo', woId: idA });
+  handleAction(ops, { action: 'escalate', caseId: a.id });
+  const idA2 = apiData(ops).cases.find((x) => x.id === a.id).linkedWo.id;
+  assert.notEqual(idA2, idB);
+  assert.equal(apiData(ops).cases.find((x) => x.id === b.id).linkedWo.id, idB, 'existing work order untouched');
+});
