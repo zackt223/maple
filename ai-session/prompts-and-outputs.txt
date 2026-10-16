@@ -867,3 +867,49 @@ update readme to show the two ways to preview the build, through github pages an
 I'll find this session's transcript on disk and pull out just your prompts and my replies.
 
 The first few prompts look like they were saved under the earlier scratch folder before the session moved. Checking:
+
+Checking the redaction and that no prompt or reply is missing:
+
+Redaction is clean: no tokens and no email addresses. Checking that the long replies came through complete:
+
+Your prompts and my replies are saved in the repo at **[`ai-session/prompts-and-outputs.txt`](ai-session/prompts-and-outputs.txt)** and pushed to GitHub, so it's online at https://github.com/zackt223/maple/blob/main/ai-session/prompts-and-outputs.txt.
+
+**What's in it:** all 22 of your prompts and my written replies, in order. Pasted text and attached images are marked, and so are the places where you interrupted me to add instructions. The README's "Link to / export of my AI session" line now points to this file.
+
+**What's not in it:**
+- **My internal steps:** file reads, commands, test runs and their raw output aren't included, only what was written to you.
+- **A few short progress notes** I wrote between steps. The app never saved them, so they can't be recovered. The file header says so.
+- **This reply.** The file was created before I wrote it.
+
+**Removed because the repo is public:** both email addresses are replaced with `[email redacted]`. I checked that no access token is in the file. The pasted token only ever appeared in internal output, which isn't included.
+
+**README, "How to run it":** it now shows two ways to view the build.
+1. **Run it on your computer (recommended):** `npm start`, then open http://localhost:3000. This is the full version: one shared live board for everyone, automatic pickup of new data, and the server checks every permission.
+2. **View it online:** https://zackt223.github.io/maple/. This is quickest, with nothing to install, and it looks the same. But each browser keeps its own changes, so other people won't see your escalations. It's best for a quick look or a demo.
+
+----- ZACK -----
+do a final review of the readme and push to main
+
+----- CLAUDE -----
+I'll check every number in the README against the current code and data, and confirm the online copy matches the latest code.
+
+I reviewed the README, checked every number in it against the current data and code, and pushed the fixes to main. All 25 tests pass.
+
+**Corrected, so check these:**
+- **Top-3 #3 now names different drivers to coach first.** It said D-49 and D-30, but by the README's own measure (serious events per 100 km driven) the top three are D-31, D-20 and D-49. D-30 is 5th. It now says to coach **D-31, D-20 and D-49**, starting with D-31: 7 serious events in 1,495 km, including 131 km/h, and speeding again today. All three run the older, less sensitive software, so their counts aren't inflated. This changes your recommendation, so make sure you agree with it.
+- **Top-3 #2:** the misfires have been running "1 to 12 days", not "2 to 12". V-151's misfire was only 1.2 days old.
+
+**Added:**
+- **Metrics:** your original brief asked for them in the README, but they had dropped out of the template version. There's now a three-line summary in "What I built": actions taken, issues resolved through the dashboard, and the "Tonight actioned" check that turns red when more is sent than acted on.
+- **Late-data test:** the README says every edge case has a test, but the "late data refreshes the list" fix didn't have one. Now it does, so the test count is 25.
+
+**Confirmed accurate:**
+- every other figure: V-137 and V-108 times and readings, 8 misfires with 3 work orders, 4 of 5 at Hamilton, D-17's 81 alerts, 3,650 km and 56th of 60, and the edge-case table
+- both ways to run the build
+- the AI-session file path
+- the GitHub Pages copy, which matches the latest code
+
+`ai-session/prompts-and-outputs.txt` was saved before this round, so it doesn't include this review. Ask if you want it refreshed.
+
+----- ZACK -----
+refresh the ai session file and push
