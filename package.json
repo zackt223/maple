@@ -1,0 +1,12 @@
+{
+  "name": "maple-freight-triage",
+  "version": "1.0.0",
+  "description": "Ranked, role-aware alert triage dashboard for Maple Freight telematics alerts",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node src/server.js",
+    "report": "node src/report.js",
+    "test": "node --test test/triage.test.js"
+  }
+}
