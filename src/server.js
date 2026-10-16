@@ -2,7 +2,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { run } = require('./triage');
+const { run, DATA_DIR } = require('./triage');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -42,7 +42,14 @@ const FIRMWARE_NOTES = {
   '4.3.0': 'Current release. Stability fixes. Normal harsh-braking rate.',
 };
 
-const triage = run();
+// Rebuilt whenever a file in data/ changes, so late deliveries (like the Hamilton backfill) show up without a restart.
+let triage = run();
+let dataVersion = 1;
+let reloadTimer = null;
+function reloadData() {
+  try { triage = run(); dataVersion++; console.log(`Data reloaded (version ${dataVersion})`); }
+  catch (e) { console.error('Data reload failed, keeping the previous data:', e.message); }
+}
 const emptyState = () => ({ cases: {}, workOrders: {}, referrals: {}, costs: {}, policy: { minFirmware: null }, log: [] });
 let state = fs.existsSync(STATE_FILE) ? { ...emptyState(), ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) } : emptyState();
 const save = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
@@ -53,7 +60,7 @@ const save = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 const CASE_TEAMS = { operations: ['operations', 'maintenance'], safety: ['safety'], maintenance: [], admin: [], finance: [] };
 const ALERT_TEAMS = { operations: ['operations'], safety: ['safety'], maintenance: [], admin: [], finance: [] };
 const SEES_ALL_ALERTS = ['operations', 'safety', 'finance', 'admin'];
-const depotOf = Object.fromEntries(triage.vehicles.map((v) => [v.vehicle_id, v.depot]));
+const depotOfMap = () => Object.fromEntries(triage.vehicles.map((v) => [v.vehicle_id, v.depot]));
 const referralFor = (caseId) => Object.entries(state.referrals).find(([, r]) => r.caseId === caseId);
 const canSeeCase = (role, c) => CASE_TEAMS[role].includes(c.team) || (role === 'safety' && !!referralFor(c.id));
 const teamOf = (type) => (['speeding', 'harsh_braking', 'harsh_accel', 'harsh_cornering'].includes(type) ? 'safety' : 'operations');
@@ -85,7 +92,7 @@ function allWorkOrders() {
     return { wo_id: id, ...w, request };
   });
   const csvWos = triage.workOrders.map((w) => ({ ...w, source: 'shop', ...(state.workOrders[w.wo_id] || {}) }));
-  for (const w of [...dashboardWos, ...csvWos]) w.depot = depotOf[w.vehicle_id] || w.depotName || null;
+  for (const w of [...dashboardWos, ...csvWos]) w.depot = depotOfMap()[w.vehicle_id] || w.depotName || null;
   const order = { 'Pending approval': 0, Approved: 1, Open: 2, Scheduled: 3, Closed: 4 };
   return [...dashboardWos, ...csvWos].sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2));
 }
@@ -156,7 +163,7 @@ function metrics(role, cases, workOrders) {
 function apiData(user) {
   if (!user) return { users: USERS };
   const role = user.role;
-  const base = { generatedFor: triage.generatedFor, rules: triage.rules, user: { ...user }, permissions: PERMISSIONS[role], access: ACCESS[role], series: triage.series, depots: triage.depots, canSeeAllAlerts: SEES_ALL_ALERTS.includes(role) };
+  const base = { dataVersion, lastReceived: triage.quality.lastReceived, generatedFor: triage.generatedFor, rules: triage.rules, user: { ...user }, permissions: PERMISSIONS[role], access: ACCESS[role], series: triage.series, depots: triage.depots, canSeeAllAlerts: SEES_ALL_ALERTS.includes(role) };
   const log = state.log.filter((l) => (l.visibleTo || [l.role]).includes(role)).slice(-50).reverse();
   if (role === 'maintenance') {
     const workOrders = allWorkOrders();
@@ -176,7 +183,7 @@ function apiData(user) {
   const cases = scopedCases(role);
   const out = { ...base, cases, lowMedium: triage.lowMedium.filter((a) => ALERT_TEAMS[role].includes(teamOf(a.type))), log, metrics: metrics(role, cases) };
   if (role === 'safety') {
-    out.drivers = triage.drivers.map((d) => ({ ...d, depot: depotOf[d.vehicle] }));
+    out.drivers = triage.drivers.map((d) => ({ ...d, depot: depotOfMap()[d.vehicle] }));
     out.referrals = referrals();
     out.firmware = firmware();
     out.vehicles = triage.vehicles.map((v) => ({ id: v.vehicle_id, depot: v.depot, driver: v.assigned_driver, firmware: v.device_firmware, cls: v.vehicle_class }));
@@ -323,14 +330,15 @@ function handleAction(user, body) {
     if (!min) return [400, { error: 'Set a minimum version first' }];
     const todo = fw.belowMinimum.filter((v) => !v.requested);
     if (!todo.length) return [409, { error: 'Every vehicle below the minimum already has an update request' }];
+    // Phased plan: 4.2.1 first (it skews driver scores), older versions after. An update plan, not a dispatch block.
     const byDepot = {};
-    todo.forEach((v) => (byDepot[v.depot] ||= []).push(v));
-    const created = Object.entries(byDepot).map(([depot, list]) => newWorkOrder(user, at, {
-      vehicle_id: `${list.length} vehicles · ${depot}`, depotName: depot, priority, firmwareTarget: min, vehicles: list.map((v) => v.vehicle),
+    todo.forEach((v) => (byDepot[v.depot + '|' + (v.firmware === '4.2.1' ? 'P2' : 'P3')] ||= []).push(v));
+    const created = Object.entries(byDepot).map(([key, list]) => { const [depot, phase] = key.split('|'); return newWorkOrder(user, at, {
+      vehicle_id: `${list.length} vehicles · ${depot}`, depotName: depot, priority: body.priority === 'P1' ? 'P1' : phase, firmwareTarget: min, vehicles: list.map((v) => v.vehicle),
       work_done: `Update telematics firmware to ${min} or newer`,
-      request: { title: 'Firmware policy', actions: [`Update telematics firmware to ${min}+ on: ${list.map((v) => `${v.vehicle} (${v.firmware})`).join(', ')}`, 'Schedule during the nightly window or before morning dispatch.', ...(body.note ? [body.note] : [])], evidence: [], history: [], context: [FIRMWARE_NOTES[min]], notes: [] },
-    }));
-    entry.target = created.join(', '); entry.detail = `${todo.length} vehicles to ${min}+`;
+      request: { title: 'Firmware policy', actions: [`Update telematics firmware to ${min}+ on: ${list.map((v) => `${v.vehicle} (${v.firmware})`).join(', ')}`, 'Schedule during the nightly window or before morning dispatch.', 'This is an update plan, not a dispatch block: vehicles keep running until updated.', ...(body.note ? [body.note] : [])], evidence: [], history: [], context: [FIRMWARE_NOTES[min]], notes: [] },
+    }); });
+    entry.target = created.join(', '); entry.detail = `${todo.length} vehicles to ${min}+ (4.2.1 first)`;
     entry.visibleTo = ['safety', 'maintenance'];
   } else {
     const id = body.woId;
@@ -365,6 +373,7 @@ const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css
 
 const server = http.createServer((req, res) => {
   const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  if (req.url === '/api/version') return send(200, { version: dataVersion });
   if (req.url === '/api/data') return send(200, apiData(USERS[req.headers['x-user']]));
   if (req.url === '/api/alerts') {
     const u = USERS[req.headers['x-user']];
@@ -389,6 +398,7 @@ const server = http.createServer((req, res) => {
 });
 
 if (require.main === module) {
+  fs.watch(DATA_DIR, () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(reloadData, 500); });
   server.listen(PORT, () => console.log(`Maple Freight triage dashboard → http://localhost:${PORT}`));
 }
 module.exports = { handleAction, apiData, USERS, PERMISSIONS, ACCESS, server };

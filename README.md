@@ -16,7 +16,7 @@ Optional:
 
 ```bash
 npm run report   # tonight's top 10 in the terminal
-npm test         # 22 automated checks
+npm test         # 23 automated checks
 ```
 
 To clear all escalations, notes and costs, delete `state.json` and restart.
@@ -26,12 +26,12 @@ To clear all escalations, notes and costs, delete `state.json` and restart.
 1. **Item:** Pull **V-108** (Hamilton) and **V-137** (North Yard) from the 6:00 a.m. dispatch.
    **Why it matters:** Both trucks overheated and then lost oil pressure. The fault-code list says to stop the vehicle immediately. Driving on, they risk engine failure on the road.
    **Evidence from the data:** V-137 ran hotter every day from Sep 17 to 20 (104 → 109 → 113 → 118 °C). The shop replaced a sensor and cleared it at 7:40 a.m. on Sep 21, and at 2:32 p.m. it lost oil pressure (96 kPa). V-108 hit 107 °C at 12:05 p.m. and lost oil pressure (88 kPa) at 3:41 p.m. Its alerts were stuck in Hamilton's outage until 6:47 p.m. The vendor marked all of these MEDIUM, so a "HIGH only" filter misses them.
-   **Next action (who, by when):** The Maintenance Lead tags out both trucks tonight and checks cooling and oil before they move. The Operations Manager assigns spare trucks for drivers D-08 and D-37 before 6:00 a.m.
+   **Next action (who, by when):** Operations first confirms where both trucks are: V-137 was in use at 10:40 and 11:37 a.m. after being cleared, and V-108 at 1:09 p.m. after overheating. The Maintenance Lead then tags out both trucks tonight and checks cooling and oil before they move. The Operations Manager assigns spare trucks for drivers D-08 and D-37 before 6:00 a.m.
 
 2. **Item:** Five trucks with engine misfires (P0300) have no work order: V-151, V-113, V-126, V-131 and V-111.
    **Why it matters:** A misfire should be inspected within 24 hours. These have been running for 2 to 12 days.
    **Evidence from the data:** 8 trucks logged a misfire; only 3 have work orders. 4 of the 5 without one are at Hamilton, where alerts reach the office up to 30 hours late. V-151 is also 2,350 km overdue for service, and its service isn't booked until Oct 5.
-   **Next action (who, by when):** The Operations Manager sends all five to Maintenance tonight. V-151 is held from dispatch and its service moved up; the other four are inspected on Tuesday, Sep 22.
+   **Next action (who, by when):** The Operations Manager sends all five to Maintenance tonight. V-151 is held from dispatch and its service moved up; the other four are inspected on Tuesday, Sep 22. V-158, which also has a misfire, is held at 6:00 a.m. because its repair is booked for the same morning.
 
 3. **Item:** D-17 is not the worst driver. Coach **D-49** and **D-30** first.
    **Why it matters:** Coaching the wrong driver wastes time and leaves the risky ones on the road.
@@ -54,6 +54,20 @@ Charts show daily alert trends and can be **exported as PNG or JPEG** for pitch 
 
 Alerts are colour-coded: red = critical, orange = high, yellow = medium, grey = low.
 
+Every alert has an **AI note**: one or two plain sentences on what it means and what to do. The notes are written by fixed rules in the code, not by a live AI service, so they need no API key and always give the same answer.
+
+The dashboard also handles problems hidden in the data:
+- **Driver and truck numbers don't match** (D-17 drives V-142). The note on each alert says so.
+- **Trucks used after a stop-the-vehicle fault** (V-137, V-108) get a "find it now" step.
+- **Late data:** each depot shows when it last sent data, and the lists refresh on their own when new data arrives.
+- **Quiet trucks:** vehicles with no alerts for 36+ hours are flagged so someone checks the unit is working. V-102 is known to be out of service.
+- **Nightly unplugs:** unplugs during the vendor's 11 p.m. update hour aren't hidden any more. V-118 unplugs at that hour every night (11 nights) and is the only truck that does, so it's flagged.
+- **Daylight saving:** times follow Eastern time correctly after Nov 1.
+- **Missing readings, daily repeats and duplicates** are explained in the alert's note.
+- **Repairs booked for dispatch morning** (V-158) or too late (V-151) get a hold or "move it up" step.
+- **Device software updates** are requested in phases (4.2.1 first) and don't stop trucks from running.
+- **Background:** the truck photo is blurred so the dashboard is easy to read.
+
 ## Assumptions I made
 
 - All data provided was taken as set; no changes to the files would be needed. Where the data disagreed with itself, I chose the more reliable source:
@@ -75,7 +89,7 @@ Alerts are colour-coded: red = critical, orange = high, yellow = medium, grey = 
 - Filtered alerts by driver, vehicle and yard.
 - Exported the charts as PNG and JPEG.
 - Signed in as each user to confirm they only see and change what they should.
-- Re-checked the numbers with a separate script (`scratch/validate.js`) and 22 automated tests (`npm test`).
+- Re-checked the numbers with a separate script (`scratch/validate.js`) and 23 automated tests (`npm test`), including one for each problem listed above.
 
 ## AI use
 - **Tools I used:** Claude Code

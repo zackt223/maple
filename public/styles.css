@@ -260,3 +260,11 @@ button { font: inherit; color: inherit; }
 @media (max-width: 1500px) { .top-inner .eyebrow { display: none; } .userpill { margin-left: auto; } }
 .exp { display: inline-flex; gap: 6px; margin-left: auto; }
 .panel-head .seg + .exp { margin-left: 8px; }
+
+/* Blurred truck photo so the dashboard stays in focus */
+.backdrop { background: #0b0b0b; }
+.backdrop::before { content: ""; position: absolute; inset: -40px; background: url('bg.jpg') right center / cover no-repeat; filter: blur(14px) brightness(.85); }
+.ai { margin-top: 6px; padding: 6px 10px; border-radius: 10px; font-size: .8rem; background: rgba(88,199,255,.10); border: 1px solid rgba(88,199,255,.22); color: var(--text); }
+.ai b { color: var(--net); font-weight: 600; margin-right: 4px; }
+.fresh { font-size: .8rem; color: var(--muted); margin: -8px 0 16px; }
+.fresh b { color: var(--text); }

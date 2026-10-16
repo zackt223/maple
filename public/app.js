@@ -91,6 +91,15 @@ function password(id) {
   $('#pw').addEventListener('submit', (e) => {
     e.preventDefault();
     USER = id; store('user', USER); TAB = null; store('tab', null); OPEN.clear(); ALERTS = null; load();
+
+// Check for new data every 30 s (e.g. a depot gateway delivering held alerts) and refresh in place.
+setInterval(async () => {
+  if (!USER || !DATA || !DATA.dataVersion) return;
+  try {
+    const { version } = await (await fetch('/api/version')).json();
+    if (version !== DATA.dataVersion) { ALERTS = null; await load(); toast('New data arrived: lists updated'); }
+  } catch {}
+}, 30000);
   });
 }
 
@@ -139,6 +148,11 @@ function caseMetrics(cases) {
   return { highCriticalSent: cases.length, resolved: cases.filter((c) => c.state?.status === 'resolved').length, tonightQueue: tonight.length, tonightActioned,
     guardrailBreached: tonightActioned < tonight.length, escalated: cases.filter((c) => c.state?.workOrder).length, referred: cases.filter((c) => c.referral).length, workflowActions: DATA.metrics.workflowActions };
 }
+// When each depot last delivered data: late deliveries can change the list after it's read.
+function freshness() {
+  if (!DATA.lastReceived) return '';
+  return `<p class="fresh">Last data received: ${DEPOTS.filter(inDepot).map((d) => `<span>${d} <b>${esc((DATA.lastReceived[d] || '').slice(11))}</b></span>`).join(' · ')} ET. The list refreshes on its own if more data arrives.</p>`;
+}
 const where = () => (DEPOT === 'all' ? 'across all depots' : 'at ' + DEPOT);
 
 function view(role) {
@@ -159,7 +173,7 @@ function view(role) {
     <div class="tile glass"><div class="k">Network</div><div class="v">${cs.filter((c) => c.network).length}</div><div class="s">communication failures ${where()}</div></div>
   </section>`;
   const team = role === 'safety' ? 'driver-behaviour' : 'vehicle';
-  if (TAB === 'tonight') return heading('Tonight', `Your ${DATA.rules.dailyCapacity} most important ${team} issues ${where()}, ranked. Start at the top.`) + tiles + cards(cs.filter((c) => c.tonight));
+  if (TAB === 'tonight') return heading('Tonight', `Your ${DATA.rules.dailyCapacity} most important ${team} issues ${where()}, ranked. Start at the top.`) + freshness() + tiles + cards(cs.filter((c) => c.tonight));
   if (TAB === 'backlog') return heading('Backlog', `Other high and critical issues ${where()}, ranked. Pull from here once tonight is done.`) + cards(cs.filter((c) => !c.tonight && c.state?.status !== 'resolved'));
   if (TAB === 'drivers') return drivers();
   if (TAB === 'referrals') return referralsView();
@@ -193,7 +207,7 @@ function card(c) {
       <div class="grow">
         <div class="title">${esc(c.title)}</div>
         <div class="sub">${esc(c.vehicle)}${c.vehicleClass ? ' · ' + esc(c.vehicleClass) : ''} · Driver ${esc(c.driver)} · <b>${esc(c.depot)}</b> · ${c.hoursAgo < 48 ? c.hoursAgo + ' h ago' : Math.round(c.hoursAgo / 24) + ' days ago'}</div>
-        <div class="capsules"><span class="capsule">${cap(c.priority)}</span>${c.network ? '<span class="capsule net">Network failure</span>' : ''}${c.backfill ? '<span class="capsule net">Arrived after network restored</span>' : c.lateArrivals ? '<span class="capsule net">Arrived late</span>' : ''}${c.recurred ? '<span class="capsule critical">After repair</span>' : ''}${statusCapsule(c)}</div>
+        <div class="capsules"><span class="capsule">${cap(c.priority)}</span>${c.network ? `<span class="capsule net">${c.kind === 'silent' ? 'Not reporting' : 'Network failure'}</span>` : ''}${c.backfill ? '<span class="capsule net">Arrived after network restored</span>' : c.lateArrivals ? '<span class="capsule net">Arrived late</span>' : ''}${c.recurred ? '<span class="capsule critical">After repair</span>' : ''}${statusCapsule(c)}</div>
       </div>
       <span class="chev">›</span>
     </div>
@@ -201,7 +215,7 @@ function card(c) {
     ${open ? `<div class="detail">
       <div><h4>What to do</h4><ol>${c.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ol></div>
       ${c.context?.length ? `<div><h4>Keep in mind</h4>${c.context.map((n) => `<div class="context">${esc(n)}</div>`).join('')}</div>` : ''}
-      <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}${e.wo ? `<div class="m">${esc(e.wo)}</div>` : ''}</div>`).join('')}
+      <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}${e.aiNote ? `<div class="ai"><b>AI note</b> ${esc(e.aiNote)}</div>` : ''}</div>`).join('')}
         ${(c.history || []).length ? `<h4 style="margin-top:10px">Earlier faults the shop marked fixed</h4>${c.history.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}<div class="m">${esc(e.wo)}</div></div>`).join('')}` : ''}</div>
       ${(st.notes || []).length || c.linkedWo || c.referral ? `<div><h4>Updates</h4>
         ${(st.notes || []).map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}
@@ -253,7 +267,7 @@ function referralCard(r) {
     ${open ? `<div class="detail">
       <div><h4>Suggested steps</h4><ol>${c.actions.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
       ${c.context.length ? `<div><h4>Keep in mind</h4>${c.context.map((n) => `<div class="context">${esc(n)}</div>`).join('')}</div>` : ''}
-      <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}</div>`).join('')}</div>
+      <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}${e.aiNote ? `<div class="ai"><b>AI note</b> ${esc(e.aiNote)}</div>` : ''}</div>`).join('')}</div>
       ${r.notes.length ? `<div><h4>Your updates</h4>${r.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}</div>` : ''}
       ${r.status === 'Open' && can('delete_referral') ? `<div class="btns"><button class="btn danger sm" data-del="delete_referral" data-ref="${esc(r.id)}">Remove referral (raised in error)</button></div>` : ''}
       ${r.status === 'Closed' || !can('referral_note') ? '' : `<div class="form" data-ref-form="${r.id}" data-case-id="${esc(r.caseId)}">
@@ -284,6 +298,7 @@ function firmwareView() {
         <div><h4>Minimum allowed version</h4>
           <div class="seg" role="group" aria-label="Minimum firmware">${f.versions.slice().reverse().map((v) => `<button type="button" data-ver="${v.version}" aria-pressed="${v.version === (min || f.recommended)}">${v.version}${v.version === f.recommended ? ' · recommended' : ''}</button>`).join('')}</div></div>
         ${can('set_min_firmware') ? '<div class="btns"><button class="btn primary" data-fw="set_min_firmware">Save minimum</button></div>' : ''}
+        <p class="sub" style="margin:0">Updates are requested in phases: 4.2.1 first (it skews driver scores), then older versions. This is an update plan, not a dispatch block; vehicles keep running until updated.</p>
         <div><h4>What each version does</h4>${f.versions.map((v) => `<div class="ev"><span class="when">${v.version}</span> · ${v.vehicles} vehicles · ${v.brakingPer100km} harsh-braking alerts per 100 km<div class="m">${esc(v.note)}</div></div>`).join('')}</div>
       </div></article>
       ${min ? (f.belowMinimum.length ? `<article class="card glass high open" style="cursor:default"><div class="detail" style="padding-left:0;margin-top:0">
@@ -386,7 +401,7 @@ function allAlertsView() {
       <div class="table-wrap"><table class="tbl"><thead><tr><th>Date (ET)</th><th>Priority</th><th>Alert</th><th>Vehicle</th><th>Driver</th><th>Yard</th><th>Detail</th><th>Vendor</th></tr></thead><tbody>
         ${rows.map((a) => `<tr><td>${esc(a.when)}</td><td><span class="capsule ${a.priority}">${cap(a.priority)}</span></td><td>${esc(cap(a.type.replace(/_/g, ' ')))}${a.dtc ? ' · ' + esc(a.dtc) : ''}</td>
           <td><b>${esc(a.vehicle)}</b><div class="sub">${esc(a.vehicleClass)} · fw ${esc(a.firmware)}</div></td><td>${esc(a.driver)}</td><td>${esc(a.depot)}</td>
-          <td>${esc(a.reason)}${a.lateH ? `<div class="sub net-t">${a.backfill ? 'Arrived after network restored' : 'Arrived late'} (${a.lateH} h)</div>` : ''}${a.wo ? `<div class="sub">${esc(a.wo)}</div>` : ''}</td><td>${esc(a.vendor)}</td></tr>`).join('') || '<tr><td colspan="8">No alerts match these filters.</td></tr>'}
+          <td>${esc(a.reason)}${a.lateH ? `<div class="sub net-t">${a.backfill ? 'Arrived after network restored' : 'Arrived late'} (${a.lateH} h)</div>` : ''}${a.aiNote ? `<div class="ai"><b>AI note</b> ${esc(a.aiNote)}</div>` : ''}</td><td>${esc(a.vendor)}</td></tr>`).join('') || '<tr><td colspan="8">No alerts match these filters.</td></tr>'}
       </tbody></table></div>
     </section>`;
 }
@@ -606,7 +621,7 @@ function lowMedium() {
       <select class="field" data-f="priority" aria-label="Priority">${opt('all', f.priority, 'All priorities')}${opt('medium', f.priority, 'Medium')}${opt('low', f.priority, 'Low')}</select>
       <select class="field" data-f="type" aria-label="Type">${opt('all', f.type, 'All types')}${types.map((t) => opt(t, f.type, cap(t.replace(/_/g, ' ')))).join('')}</select>
     </div>
-    <div class="rows glass">${list.slice(0, f.limit).map((a) => `<div class="r ${a.priority}"><span class="dot"></span><div class="grow"><div class="title" style="font-size:.92rem">${esc(a.reason)}</div><div class="sub">${esc(a.vehicle)}${a.vehicleClass ? ' · ' + esc(a.vehicleClass) : ''} · Driver ${esc(a.driver)} · <b>${esc(a.depot)}</b> · ${esc(a.when)} ET${a.backfill ? ' · arrived after network restored' : a.late ? ' · arrived late' : ''}</div></div><span class="capsule">${cap(a.priority)}</span></div>`).join('') || '<div class="r">No alerts match.</div>'}</div>
+    <div class="rows glass">${list.slice(0, f.limit).map((a) => `<div class="r ${a.priority}"><span class="dot"></span><div class="grow"><div class="title" style="font-size:.92rem">${esc(a.reason)}</div><div class="sub">${esc(a.vehicle)}${a.vehicleClass ? ' · ' + esc(a.vehicleClass) : ''} · Driver ${esc(a.driver)} · <b>${esc(a.depot)}</b> · ${esc(a.when)} ET${a.backfill ? ' · arrived after network restored' : a.late ? ' · arrived late' : ''}</div>${a.aiNote ? `<div class="ai"><b>AI note</b> ${esc(a.aiNote)}</div>` : ''}</div><span class="capsule">${cap(a.priority)}</span></div>`).join('') || '<div class="r">No alerts match.</div>'}</div>
     ${list.length > f.limit ? `<button class="btn more" id="more">Show more (${list.length - f.limit})</button>` : ''}`;
 }
 

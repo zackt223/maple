@@ -7,7 +7,7 @@ const { run, classify, dedupe, RULES } = require('../src/triage');
 const { handleAction, apiData, USERS } = require('../src/server');
 
 const r = run();
-const ctx = { rules: RULES, dtc: { P0217: { urgency: 'Critical', meaning: 'over-temp' }, P0420: { urgency: 'Low', meaning: 'cat' } } };
+const ctx = { rules: RULES, otaNights: { 'V-9': 5 }, dtc: { P0217: { urgency: 'Critical', meaning: 'over-temp' }, P0420: { urgency: 'Low', meaning: 'cat' } } };
 const alert = (o) => ({ alert_type: 'speeding', value: '100', event_time_utc: '2026-09-21T15:00:00Z', posted_limit_kmh: '', ...o });
 
 test('speeding: >115 high, <=115 medium', () => {
@@ -26,8 +26,9 @@ test('engine faults: severity from DTC reference, not vendor', () => {
   assert.equal(classify(alert({ alert_type: 'engine_fault', dtc_code: 'P0420', vendor_severity: 'HIGH' }), ctx).priority, 'high');
 });
 
-test('unplugged: OTA window (23:00 ET = 03:00Z) suppressed, daytime high', () => {
-  assert.equal(classify(alert({ alert_type: 'device_unplugged', event_time_utc: '2026-09-21T03:30:00Z' }), ctx).priority, 'suppressed');
+test('unplugged: update hour (23:00 ET = 03:00Z) is low (not hidden), repeated nightly is high, daytime high', () => {
+  assert.equal(classify(alert({ alert_type: 'device_unplugged', vehicle_id: 'V-1', event_time_utc: '2026-09-21T03:30:00Z' }), ctx).priority, 'low');
+  assert.equal(classify(alert({ alert_type: 'device_unplugged', vehicle_id: 'V-9', event_time_utc: '2026-09-21T03:30:00Z' }), ctx).priority, 'high');
   assert.equal(classify(alert({ alert_type: 'device_unplugged', event_time_utc: '2026-09-21T15:30:00Z' }), ctx).priority, 'high');
 });
 
@@ -132,7 +133,9 @@ test('safety advisory and firmware minimum create maintenance work orders', () =
   assert.equal(fw.compliant, 24);
   assert.equal(handleAction(safety, { action: 'request_firmware_update' })[0], 200);
   const wos = apiData(maint).workOrders.filter((w) => w.firmwareTarget === '4.3.0');
-  assert.equal(wos.length, 3, 'one per depot');
+  assert.ok(wos.length >= 3, 'split by depot and phase');
+  const veh = Object.fromEntries(apiData(safety).vehicles.map((v) => [v.id, v.firmware]));
+  assert.ok(wos.every((w) => w.vehicles.every((id) => (veh[id] === '4.2.1') === (w.priority === 'P2'))), '4.2.1 first (P2), older versions P3');
   assert.equal(wos.reduce((n, w) => n + w.vehicles.length, 0), 36);
   assert.equal(apiData(safety).firmware.belowMinimum.every((v) => v.requested), true);
   assert.equal(handleAction(safety, { action: 'request_firmware_update' })[0], 409, 'no duplicate requests');
@@ -208,4 +211,24 @@ test('ids are never reused after a delete', () => {
   const idA2 = apiData(ops).cases.find((x) => x.id === a.id).linkedWo.id;
   assert.notEqual(idA2, idB);
   assert.equal(apiData(ops).cases.find((x) => x.id === b.id).linkedWo.id, idB, 'existing work order untouched');
+});
+
+test('edge-case fixes', () => {
+  const { tzOffsetMin, localStr } = require('../src/triage');
+  assert.equal(tzOffsetMin(new Date('2026-09-21T12:00:00Z')), -240, 'EDT in September');
+  assert.equal(tzOffsetMin(new Date('2026-11-05T12:00:00Z')), -300, 'EST after Nov 1');
+  assert.equal(localStr('2026-11-05T15:00:00Z'), '2026-11-05 10:00');
+  const v137 = r.cases.find((c) => c.vehicle === 'V-137' && c.kind === 'engine');
+  assert.deepEqual(v137.movedAfter, ['10:40', '11:37'], 'V-137 was in use after being cleared');
+  assert.ok(r.cases.find((c) => c.vehicle === 'V-158' && c.kind === 'engine').actions[0].includes('hold V-158 from the 6:00 a.m. dispatch'));
+  assert.ok(r.cases.find((c) => c.vehicle === 'V-151' && c.kind === 'maintenance').actions[0].includes('too late'));
+  const v118 = r.cases.find((c) => c.vehicle === 'V-118' && c.kind === 'device');
+  assert.ok(v118 && /11 nights/.test(v118.title), 'nightly unplug pattern surfaced');
+  const silent = r.cases.filter((c) => c.kind === 'silent');
+  assert.ok(silent.length && silent.every((c) => !c.vehicle.includes('V-102')), 'quiet units flagged; V-102 is known out of service');
+  assert.ok(r.allAlerts.every((a) => a.aiNote && a.aiNote.length > 10), 'every alert has an AI note');
+  assert.ok(r.allAlerts.find((a) => a.vehicle === 'V-142').aiNote.includes("don't look for D-17 on V-117"));
+  assert.ok(r.allAlerts.filter((a) => a.type === 'engine_fault' && !a.value).every((a) => a.aiNote.includes('No reading')));
+  assert.ok(r.allAlerts.some((a) => /sent this 2 times/.test(a.aiNote)), 'duplicates explained');
+  assert.ok(r.allAlerts.filter((a) => a.type === 'maintenance_due').every((a) => /latest value counts/.test(a.aiNote)));
 });

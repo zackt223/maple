@@ -7,7 +7,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 // Export taken Monday Sep 21 2026, 6:00 p.m. Eastern (EDT = UTC-4).
 // Hamilton's gateway reconnected at 6:47 p.m. ET and delivered held alerts (hamilton_backfill.csv), so data is as of then.
 const NOW_UTC = new Date('2026-09-21T22:47:00Z');
-const EDT_OFFSET_H = -4;
+const TZ = 'America/Toronto';
 
 const RULES = {
   speedingHighKmh: 115,      // > 115 km/h is high; <= 115 is medium (team rule)
@@ -17,6 +17,8 @@ const RULES = {
   dailyCapacity: 10,         // ops can act on ~10 things a day
   speedingOverLimitHigh: 40, // 40+ km/h over a known posted limit is extreme even below 115 (e.g. 104 in a 60)
   lateMinutes: 60,           // received > 60 min after the event = held by a communication/network failure
+  otaRepeatNights: 3,        // unplugged in the update hour on 3+ nights = a pattern, not the update
+  silentHours: 36,           // no alert at all for 36+ h = check the unit is still reporting
 };
 
 function parseCsv(file) {
@@ -51,10 +53,21 @@ function parseDtc() {
   return out;
 }
 
-const toLocal = (iso) => new Date(new Date(iso).getTime() + EDT_OFFSET_H * 3600e3);
+// Minutes Eastern time is ahead of UTC at a given instant (-240 in summer, -300 in winter).
+const TZ_FMT = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function tzOffsetMin(date) {
+  const p = Object.fromEntries(TZ_FMT.formatToParts(date).map((x) => [x.type, +x.value || 0]));
+  return (Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(date.getTime() / 1000) * 1000) / 60000;
+}
+// A Date whose UTC fields read as Eastern wall-clock time.
+const toLocal = (iso) => { const d = new Date(iso); return new Date(d.getTime() + tzOffsetMin(d) * 60000); };
 const localStr = (iso) => toLocal(iso).toISOString().slice(0, 16).replace('T', ' ');
-// Work-order times are Eastern; convert to a UTC Date for comparison.
-const woTimeUtc = (s) => (s ? new Date(s.replace(' ', 'T') + ':00Z').getTime() - EDT_OFFSET_H * 3600e3 : null);
+// Work-order times are Eastern wall-clock; convert to UTC milliseconds for comparison.
+function woTimeUtc(s) {
+  if (!s) return null;
+  const wall = new Date(s.replace(' ', 'T') + ':00Z').getTime();
+  return wall - tzOffsetMin(new Date(wall - tzOffsetMin(new Date(wall)) * 60000)) * 60000;
+}
 const hoursAgo = (iso) => (NOW_UTC - new Date(iso)) / 3600e3;
 
 function loadAll() {
@@ -81,9 +94,10 @@ function dedupe(raw) {
   const dupes = [];
   for (const a of raw) {
     const key = [a.vehicle_id, a.alert_type, a.event_time_utc, a.value, a.dtc_code].join('|');
-    if (seen.has(key)) { dupes.push({ ...a, duplicate_of: seen.get(key) }); continue; }
-    seen.set(key, a.alert_id);
-    kept.push(a);
+    if (seen.has(key)) { dupes.push({ ...a, duplicate_of: seen.get(key).alert_id }); seen.get(key).copies++; continue; }
+    const k = { ...a, copies: 1 };
+    seen.set(key, k);
+    kept.push(k);
   }
   return { kept, dupes };
 }
@@ -105,10 +119,14 @@ function classify(a, ctx) {
       if (v > 0) return { priority: 'high', team: 'maintenance', reason: `Service overdue by ${v} km` };
       return { priority: 'suppressed', team: 'maintenance', reason: `Not yet due (${v} km) — vendor: negative = not due` };
     case 'device_unplugged':
-      if (hourLocal === ctx.rules.otaWindowHourLocal) return { priority: 'suppressed', team: 'operations', reason: 'During nightly OTA window (23:00–00:00) — expected' };
+      if (hourLocal === ctx.rules.otaWindowHourLocal) {
+        const nights = ctx.otaNights[a.vehicle_id] || 0;
+        if (nights >= ctx.rules.otaRepeatNights) return { priority: 'high', team: 'operations', reason: `Unplugged in the 23:00 update hour on ${nights} nights; no other vehicle does this, so the update doesn't explain it` };
+        return { priority: 'low', team: 'operations', reason: 'Unplugged during the vendor update hour (23:00–00:00), usually expected' };
+      }
       return { priority: 'high', team: 'operations', reason: `Device unplugged at ${localStr(a.event_time_utc).slice(11)} — outside OTA window, possible tampering or loose harness` };
     case 'camera_offline':
-      if (hourLocal === ctx.rules.otaWindowHourLocal) return { priority: 'suppressed', team: 'operations', reason: 'During nightly OTA window — expected' };
+      if (hourLocal === ctx.rules.otaWindowHourLocal) return { priority: (ctx.otaNights[a.vehicle_id] || 0) >= ctx.rules.otaRepeatNights ? 'medium' : 'low', team: 'operations', reason: 'Camera offline during the vendor update hour (23:00–00:00)' };
       return { priority: 'medium', team: 'operations', reason: 'Camera offline during operating hours' };
     case 'speeding':
       if (a.posted_limit_kmh && v - +a.posted_limit_kmh >= ctx.rules.speedingOverLimitHigh) return { priority: 'high', team: 'safety', reason: `${v} km/h in a ${a.posted_limit_kmh} zone — ${v - +a.posted_limit_kmh} km/h over the limit` };
@@ -154,6 +172,7 @@ function matchWorkOrder(a, cls, workOrders) {
 }
 
 // ---- Step 4: group high/critical alerts into cases --------------------------
+const MOVING = ['speeding', 'harsh_braking', 'harsh_accel', 'harsh_cornering', 'idling'];
 function caseKey(a) {
   switch (a.alert_type) {
     case 'engine_fault': return `${a.vehicle_id}|engine`;
@@ -243,6 +262,30 @@ function networkCases(alerts, ctx) {
   return out;
 }
 
+// No alerts is not the same as no problems: a unit that stops reporting looks "quiet".
+function silentCases(alerts, ctx) {
+  const last = {};
+  for (const a of alerts) if (!last[a.vehicle_id] || a.event_time_utc > last[a.vehicle_id]) last[a.vehicle_id] = a.event_time_utc;
+  const out = [];
+  for (const depot of ['North Yard', 'Airport Hub', 'Hamilton Depot']) {
+    const quiet = ctx.vehicles.filter((v) => v.depot === depot && (!last[v.vehicle_id] || hoursAgo(last[v.vehicle_id]) >= ctx.rules.silentHours));
+    if (!quiet.length) continue;
+    const parked = (id) => ctx.workOrders.find((w) => w.vehicle_id === id && w.status === 'Open' && /not dispatched|removed/i.test(w.technician_note + w.work_done));
+    const live = quiet.filter((v) => !parked(v.vehicle_id));
+    if (!live.length) continue;
+    out.push({
+      id: 'C-SILENT-' + depot.replace(/ /g, '-'), kind: 'silent', network: true, team: 'operations', depot,
+      title: `${depot}: ${live.length} vehicle${live.length > 1 ? 's' : ''} not reporting for ${ctx.rules.silentHours}+ h`,
+      score: 450 + live.length * 20, priority: 'high', vehicle: live.map((v) => v.vehicle_id).join(', '), driver: live.map((v) => v.assigned_driver).join(', '),
+      latestLocal: '', hoursAgo: 0, count: live.length, recurred: false, workOrder: null,
+      evidence: quiet.map((v) => ({ when: last[v.vehicle_id] ? localStr(last[v.vehicle_id]) : 'never', reason: `${v.vehicle_id} (${v.vehicle_class}, driver ${v.assigned_driver}): last alert ${last[v.vehicle_id] ? Math.round(hoursAgo(last[v.vehicle_id])) + ' h ago' : 'never'}${parked(v.vehicle_id) ? ` (out of service: ${parked(v.vehicle_id).wo_id})` : ''}`, vendor: '' })),
+      actions: [`Operations: confirm these units are powered and reporting before dispatch: ${live.map((v) => v.vehicle_id).join(', ')}.`, 'Operations: a quiet vehicle may just be parked; a quiet vehicle that is driving has no tracking or safety recording.'],
+      context: [depot === 'Hamilton Depot' ? "Hamilton's gateway has been unreliable, so silence here may be a held backlog." : 'This depot has normal data delivery, so silence points at the vehicle unit.'],
+    });
+  }
+  return out;
+}
+
 function buildCases(alerts, ctx) {
   const groups = new Map();
   for (const a of alerts) {
@@ -284,7 +327,8 @@ function buildCases(alerts, ctx) {
       title = `${latest.vehicle_id} service overdue ${km} km`;
     } else if (kind === 'device') {
       score += list.length * 40;
-      title = `${latest.vehicle_id} telematics unplugged ${list.length}× during driving hours`;
+      const nightly = list.filter((a) => toLocal(a.event_time_utc).getUTCHours() === ctx.rules.otaWindowHourLocal).length;
+      title = nightly >= ctx.rules.otaRepeatNights ? `${latest.vehicle_id} unplugged in the 23:00 update hour on ${ctx.otaNights[latest.vehicle_id]} nights (only vehicle doing this)` : `${latest.vehicle_id} telematics unplugged ${list.length}× during driving hours`;
     } else if (kind === 'speeding') {
       const max = Math.max(...list.map((a) => +a.value));
       score += (max - 115) * 5 + list.length * 25;
@@ -307,9 +351,26 @@ function buildCases(alerts, ctx) {
       hoursAgo: Math.round(hrs),
       count: list.length,
       recurred, workOrder: openWo ? openWo.wo : (recurred ? list.find((a) => a.wo)?.wo : null),
-      evidence: list.slice(0, 8).map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason + (a.lagMin > ctx.rules.lateMinutes ? ` (arrived ${(a.lagMin / 60).toFixed(1)} h late${a.backfill ? ', after Hamilton gateway restored 6:47 p.m.' : ''})` : ''), vendor: a.vendor_severity, wo: a.wo?.note })),
+      evidence: list.slice(0, 8).map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason + (a.lagMin > ctx.rules.lateMinutes ? ` (arrived ${(a.lagMin / 60).toFixed(1)} h late${a.backfill ? ', after Hamilton gateway restored 6:47 p.m.' : ''})` : ''), vendor: a.vendor_severity, wo: a.wo?.note, aiNote: a.aiNote })),
     };
     c.actions = ACTIONS[actionKey](c);
+    const woRec = c.workOrder && ctx.workOrders.find((w) => w.wo_id === c.workOrder.wo);
+    if (woRec && woRec.status === 'Open' && ['engine', 'maintenance'].includes(kind)) {
+      c.score += 250; // dispatch is at 6:00 a.m., so this belongs on tonight's list
+      c.actions.unshift(`Operations: hold ${c.vehicle} from the 6:00 a.m. dispatch until ${woRec.wo_id} is done (${woRec.technician_note.replace(/\.$/, '')}).`);
+    }
+    if (woRec && woRec.status === 'Scheduled' && kind === 'maintenance' && +latest.value > 1000) c.actions.unshift(`Maintenance: ${woRec.wo_id} is booked for ${(woRec.technician_note.match(/\d{4}-\d{2}-\d{2}/) || ['later'])[0]}, too late at ${latest.value} km overdue. Move it up.`);
+    if (kind === 'engine' && isCritical) {
+      const firstCrit = list.filter((a) => a.priority === 'critical').map((a) => a.event_time_utc).sort()[0];
+      const moved = ctx.allAlerts.filter((a) => a.vehicle_id === c.vehicle && MOVING.includes(a.alert_type) && a.event_time_utc > firstCrit);
+      const closed = ctx.workOrders.filter((w) => w.vehicle_id === c.vehicle && w.status === 'Closed' && w.closedUtc > new Date(firstCrit) - 7 * 864e5);
+      const afterFix = closed.length ? ctx.allAlerts.filter((a) => a.vehicle_id === c.vehicle && MOVING.includes(a.alert_type) && new Date(a.event_time_utc) > closed[closed.length - 1].closedUtc) : [];
+      const m = [...new Set([...moved, ...afterFix])].sort((x, y) => x.event_time_utc.localeCompare(y.event_time_utc));
+      if (m.length) {
+        c.movedAfter = m.map((a) => localStr(a.event_time_utc).slice(11));
+        c.actions.unshift(`Operations: find ${c.vehicle} now. It was in use at ${c.movedAfter.join(', ')} ET after the fault or repair, so it may not be at the depot.`);
+      }
+    }
     c.vehicleClass = v?.vehicle_class;
     c.context = contextNotes(c, v, ctx);
     cases.push(c);
@@ -320,7 +381,7 @@ function buildCases(alerts, ctx) {
     c.history = alerts.filter((a) => a.vehicle_id === c.vehicle && a.alert_type === 'engine_fault' && a.wo?.state === 'resolved')
       .map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason, vendor: a.vendor_severity, wo: a.wo.note }));
   }
-  cases.push(...networkCases(alerts, ctx));
+  cases.push(...networkCases(alerts, ctx), ...silentCases(alerts, ctx));
   cases.sort((a, b) => b.score - a.score);
   cases.forEach((c, i) => { c.rank = i + 1; c.tonight = i < ctx.rules.dailyCapacity; });
   return cases;
@@ -364,14 +425,74 @@ function dataQuality(raw, dupes, alerts, ctx) {
     suppressed: alerts.filter((a) => a.priority === 'suppressed').length,
     lateByDepot, firmware: fw, criticalCodesMarkedBelowHigh: vendorMismatch, lowCodesMarkedHigh,
     speedingVendorDisagrees: alerts.filter((a) => a.alert_type === 'speeding' && ((+a.value > 115) !== (a.vendor_severity === 'HIGH'))).length,
+    lastReceived: Object.fromEntries(['North Yard', 'Airport Hub', 'Hamilton Depot'].map((d) => [d, localStr(alerts.filter((a) => a.depot === d).map((a) => a.received_time_utc).sort().pop())])),
     speedingNoPostedLimit: alerts.filter((a) => a.alert_type === 'speeding' && !a.posted_limit_kmh).length,
   };
+}
+
+// Plain-language note for every alert: what it means, what to do, and anything in the data that changes how to read it.
+function aiNote(a, ctx) {
+  const v = ctx.vehicleById[a.vehicle_id];
+  const val = +a.value;
+  const n = [];
+  switch (a.alert_type) {
+    case 'engine_fault': {
+      const u = ctx.dtc[a.dtc_code]?.urgency;
+      n.push(u === 'Critical' ? `Stop-the-vehicle fault. Keep ${a.vehicle_id} off the road until Maintenance checks it.`
+        : u === 'High' ? 'Engine misfire. Inspect within 24 hours.'
+        : u === 'Medium' ? 'Fuel-mixture problem. Check it at the next service.'
+        : 'Low urgency (emissions or thermostat). Fix at the next service; no dispatch change.');
+      if (!a.value) n.push('No reading was sent, so this fault cannot be tracked over time.');
+      break;
+    }
+    case 'maintenance_due':
+      n.push(val > 0 ? `Service is ${val} km overdue. Book the next open bay.` : 'Not due yet.');
+      n.push('This alert repeats every morning at 6:00; only the latest value counts.');
+      break;
+    case 'device_unplugged':
+      n.push(a.priority === 'low' ? 'Happened in the nightly update hour, which is normally expected.'
+        : 'Tracking and safety recording stop while unplugged. Check the harness and talk to the driver.');
+      break;
+    case 'camera_offline':
+      n.push(a.priority === 'low' ? 'Happened in the nightly update hour, which is normally expected.' : 'No camera footage while offline. Check the camera before the next trip.');
+      break;
+    case 'speeding':
+      n.push(a.priority === 'high' ? 'Serious speeding. Coach the driver this week.' : 'Moderate speeding. Include it in the weekly review.');
+      if (!a.posted_limit_kmh) n.push('The map provider had no speed limit for this road.');
+      break;
+    case 'harsh_braking':
+      n.push(val >= ctx.rules.brakingHighG ? 'Emergency-stop braking. Review the camera clip for a near miss.' : val >= ctx.rules.brakingMediumG ? 'Firm braking. Watch for a pattern.' : 'Light braking.');
+      if (val < ctx.rules.brakingMediumG && v.device_firmware === '4.2.1') n.push('Firmware 4.2.1 records many of these, so it is mostly noise.');
+      break;
+    case 'harsh_accel': case 'harsh_cornering':
+      n.push(val >= 0.5 ? 'Aggressive driving. Use it as a weekly coaching topic.' : 'Minor; no action on its own.');
+      break;
+    case 'idling':
+      n.push(val >= 60 ? `Idled over an hour (${val} min). Wasted fuel; mention it to the driver.` : 'Short idle; no action on its own.');
+      break;
+  }
+  if (a.backfill) n.push(`Held by Hamilton's gateway outage; it only arrived at 6:47 p.m. (${(a.lagMin / 60).toFixed(1)} h late).`);
+  else if (a.lagMin > ctx.rules.lateMinutes) n.push(`Arrived ${(a.lagMin / 60).toFixed(1)} h late because of a network delay at ${a.depot}.`);
+  if (a.copies > 1) n.push(`The vendor sent this ${a.copies} times; counted once.`);
+  if (a.wo) n.push(a.wo.note + '.');
+  const crit = ctx.critFirst[a.vehicle_id];
+  if (crit && MOVING.includes(a.alert_type) && a.event_time_utc > crit) n.push(`${a.vehicle_id} was in use here after a stop-the-vehicle fault (${localStr(crit).slice(11)} ET).`);
+  if ('D-' + a.vehicle_id.slice(-2) !== a.driver_id) n.push(`Note: ${a.driver_id} drives ${a.vehicle_id}. Driver and truck numbers don't match, so don't look for ${a.driver_id} on V-1${a.driver_id.slice(-2)}.`);
+  return n.join(' ');
 }
 
 function run() {
   const ctx = loadAll();
   ctx.rules = RULES;
   const { kept, dupes } = dedupe(ctx.raw);
+  // Nights each vehicle was unplugged in the update hour (a pattern if it keeps happening).
+  ctx.otaNights = {};
+  const nightSeen = new Set();
+  for (const a of kept) {
+    if (a.alert_type !== 'device_unplugged' || toLocal(a.event_time_utc).getUTCHours() !== RULES.otaWindowHourLocal) continue;
+    const k = a.vehicle_id + localStr(a.event_time_utc).slice(0, 10);
+    if (!nightSeen.has(k)) { nightSeen.add(k); ctx.otaNights[a.vehicle_id] = (ctx.otaNights[a.vehicle_id] || 0) + 1; }
+  }
   const alerts = kept.map((a) => {
     const cls = classify(a, ctx);
     const out = { ...a, ...cls, depot: ctx.vehicleById[a.vehicle_id]?.depot, local: localStr(a.event_time_utc) };
@@ -379,6 +500,10 @@ function run() {
     out.lagMin = (new Date(a.received_time_utc) - new Date(a.event_time_utc)) / 60000;
     return out;
   });
+  ctx.allAlerts = alerts;
+  ctx.critFirst = {};
+  for (const a of alerts) if (a.priority === 'critical' && a.alert_type === 'engine_fault' && (!ctx.critFirst[a.vehicle_id] || a.event_time_utc < ctx.critFirst[a.vehicle_id])) ctx.critFirst[a.vehicle_id] = a.event_time_utc;
+  for (const a of alerts) a.aiNote = aiNote(a, ctx);
   const cases = buildCases(alerts, ctx);
   const counts = {};
   for (const a of alerts) counts[a.priority] = (counts[a.priority] || 0) + 1;
@@ -398,7 +523,7 @@ function run() {
   const allAlerts = alerts.map((a) => {
     const v = ctx.vehicleById[a.vehicle_id];
     return { id: a.alert_id, type: a.alert_type, priority: a.priority, vendor: a.vendor_severity, when: a.local, vehicle: a.vehicle_id, vehicleClass: v.vehicle_class, firmware: v.device_firmware,
-      driver: a.driver_id, depot: a.depot, reason: a.reason, value: a.value, unit: a.unit, dtc: a.dtc_code, lateH: a.lagMin > RULES.lateMinutes ? +(a.lagMin / 60).toFixed(1) : 0, backfill: !!a.backfill, wo: a.wo?.note || '' };
+      driver: a.driver_id, depot: a.depot, reason: a.reason, value: a.value, unit: a.unit, dtc: a.dtc_code, lateH: a.lagMin > RULES.lateMinutes ? +(a.lagMin / 60).toFixed(1) : 0, backfill: !!a.backfill, wo: a.wo?.note || '', aiNote: a.aiNote };
   }).sort((x, y) => y.when.localeCompare(x.when));
   return {
     series, allAlerts,
@@ -408,7 +533,7 @@ function run() {
     cases,
     lowMedium: alerts.filter((a) => ['medium', 'low'].includes(a.priority) && !a.wo)
       .sort((a, b) => b.event_time_utc.localeCompare(a.event_time_utc))
-      .map((a) => ({ late: a.lagMin > RULES.lateMinutes, backfill: !!a.backfill, vehicleClass: ctx.vehicleById[a.vehicle_id]?.vehicle_class, id: a.alert_id, type: a.alert_type, priority: a.priority, vehicle: a.vehicle_id, driver: a.driver_id, depot: a.depot, when: a.local, reason: a.reason, vendor: a.vendor_severity })),
+      .map((a) => ({ late: a.lagMin > RULES.lateMinutes, backfill: !!a.backfill, vehicleClass: ctx.vehicleById[a.vehicle_id]?.vehicle_class, id: a.alert_id, type: a.alert_type, priority: a.priority, vehicle: a.vehicle_id, driver: a.driver_id, depot: a.depot, when: a.local, reason: a.reason, vendor: a.vendor_severity, aiNote: a.aiNote })),
     workOrders: ctx.workOrders.map(({ openedUtc, closedUtc, codes, isDevice, isService, ...w }) => w),
     vehicles: ctx.vehicles,
     depots: ['North Yard', 'Airport Hub', 'Hamilton Depot'],
@@ -418,4 +543,4 @@ function run() {
   };
 }
 
-module.exports = { run, classify, dedupe, RULES, localStr };
+module.exports = { run, classify, dedupe, RULES, localStr, tzOffsetMin, DATA_DIR };
