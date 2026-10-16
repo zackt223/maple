@@ -10,6 +10,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const role = () => DATA.users[USER].role;
 const can = (action) => DATA.permissions[role()].includes(action);
+const et = (iso) => iso ? new Date(iso).toLocaleString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' ET' : '';
 const teamLabel = { operations: 'Operations', safety: 'Safety', maintenance: 'Maintenance' };
 
 async function load() {
@@ -117,14 +118,16 @@ function card(c) {
       <button class="btn" data-do="case_note">Add note</button>
       <button class="btn ok" data-do="resolve" ${done ? 'disabled' : ''}>Mark resolved</button>
     </div>` : `<div class="controls"><span class="locked">Maintenance can’t change cases. Escalated ones appear in the Maintenance tab.</span></div>`;
-  const notes = (st.notes || []).map((n) => `<div><b>${esc(n.by)}</b> · ${esc(n.at.slice(0, 16).replace('T', ' '))} — ${esc(n.text)}</div>`).join('');
+  const lw = c.linkedWo;
+  const woLine = lw ? `<div class="notes"><div><b>${esc(lw.id)}</b> · ${esc(lw.status)}${lw.eta ? ' · ETA ' + esc(lw.eta.replace('T', ' ')) : ' · no ETA yet'}</div>${(lw.notes || []).map((n) => `<div>🔧 <b>${esc(n.by)}</b> · ${esc(et(n.at))} — ${esc(n.text)}</div>`).join('')}</div>` : '';
+  const notes = (st.notes || []).map((n) => `<div><b>${esc(n.by)}</b> · ${esc(et(n.at))} — ${esc(n.text)}</div>`).join('');
   return `<article class="card ${c.priority} ${done ? 'done' : ''}">
     <div class="card-head"><span class="rank">#${c.rank}</span><h3>${esc(c.title)}</h3>
       <span class="pill ${c.priority}">${c.priority}</span><span class="pill team">${teamLabel[c.team]}</span>${c.recurred ? '<span class="pill critical">after repair</span>' : ''}${statusPill}</div>
     <div class="meta">${esc(c.vehicle)} · ${esc(c.driver)} · ${esc(c.depot)} · last ${esc(c.latestLocal)} ET (${c.hoursAgo} h ago) · ${c.count} alert${c.count > 1 ? 's' : ''}${c.workOrder ? ' · ' + esc(c.workOrder.note) : ''}</div>
     <ol>${c.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ol>
     <details><summary>Evidence (${c.evidence.length}${hist ? ' + repair history' : ''})</summary>${ev}${hist ? '<p class="muted">Earlier faults the shop marked fixed:</p>' + hist : ''}</details>
-    ${notes ? `<div class="notes">${notes}</div>` : ''}
+    ${notes ? `<div class="notes">${notes}</div>` : ''}${woLine}
     ${caseActions}
   </article>`;
 }
@@ -133,18 +136,18 @@ function maintenance() {
   const wos = DATA.workOrders;
   const rows = wos.map((w) => {
     const pr = w.priority ? { P1: 'critical', P2: 'high', P3: 'medium' }[w.priority] : (w.status === 'Closed' ? 'low' : 'medium');
-    const ctrl = can('approve_wo') ? `
+    const ctrl = w.status === 'Closed' ? '' : can('approve_wo') ? `
       <div class="controls" data-wo="${esc(w.wo_id)}">
         ${w.status === 'Pending approval' ? '<button class="btn primary" data-do="approve_wo">Approve work order</button>' : ''}
         <input type="datetime-local" aria-label="Estimated completion" value="${esc(w.eta || '')}"><button class="btn" data-do="set_eta">Set ETA</button>
         <input type="text" placeholder="Note for ops & safety" aria-label="Note"><button class="btn" data-do="wo_note">Add note</button>
       </div>` : `<div class="controls"><span class="locked">Read-only for ${teamLabel[role()]}. Maintenance approves, sets ETAs and adds notes.</span></div>`;
-    const notes = (w.notes || []).map((n) => `<div><b>${esc(n.by)}</b> · ${esc(n.at.slice(0, 16).replace('T', ' '))} — ${esc(n.text)}</div>`).join('');
+    const notes = (w.notes || []).map((n) => `<div><b>${esc(n.by)}</b> · ${esc(et(n.at))} — ${esc(n.text)}</div>`).join('');
     return `<article class="card ${pr}">
       <div class="card-head"><span class="rank">${esc(w.wo_id)}</span><h3>${esc(w.vehicle_id)} · ${esc(w.work_done)}</h3>
         ${w.priority ? `<span class="pill ${pr}">${esc(w.priority)}</span>` : ''}<span class="pill ${w.status === 'Closed' ? 'ok' : 'team'}">${esc(w.status)}</span>
         <span class="pill team">${w.source === 'dashboard' ? 'Escalated by ' + esc(w.requestedBy) : 'Shop system'}</span></div>
-      <div class="meta">Opened ${esc((w.opened_local || '').slice(0, 16).replace('T', ' '))}${w.closed_local ? ' · closed ' + esc(w.closed_local) : ''}${w.eta ? ' · <b>ETA ' + esc(w.eta.replace('T', ' ')) + '</b>' : ''}${w.approvedBy ? ' · approved by ' + esc(w.approvedBy) : ''}</div>
+      <div class="meta">Opened ${esc(w.source === 'dashboard' ? et(w.opened_local) : w.opened_local)}${w.closed_local ? ' · closed ' + esc(w.closed_local) : ''}${w.eta ? ' · <b>ETA ' + esc(w.eta.replace('T', ' ')) + '</b>' : ''}${w.approvedBy ? ' · approved by ' + esc(w.approvedBy) : ''}</div>
       ${w.technician_note ? `<p class="meta">${esc(w.technician_note)}</p>` : ''}
       ${notes ? `<div class="notes">${notes}</div>` : ''}
       ${ctrl}
@@ -178,7 +181,7 @@ function drivers() {
 function activity() {
   if (!DATA.log.length) return intro('Activity', 'No workflow actions yet. Every escalation, approval, ETA, note and resolution is logged here and counts toward the metrics.');
   return intro('Activity', 'Latest 50 workflow actions.') + `<div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody>
-    ${DATA.log.map((l) => `<tr><td>${esc(l.at.slice(0, 16).replace('T', ' '))}</td><td>${esc(l.user)}</td><td>${esc(l.action)}</td><td>${esc(l.target)}</td><td>${esc(l.detail)}</td></tr>`).join('')}</tbody></table></div>`;
+    ${DATA.log.map((l) => `<tr><td>${esc(et(l.at))}</td><td>${esc(l.user)}</td><td>${esc(l.action)}</td><td>${esc(l.target)}</td><td>${esc(l.detail)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function wire() {

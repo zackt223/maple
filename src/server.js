@@ -55,11 +55,17 @@ function metrics() {
 
 function apiData() {
   const { _alerts, ...rest } = triage;
-  const cases = triage.cases.map((c) => ({ ...c, state: state.cases[c.id] || null }));
+  const cases = triage.cases.map((c) => {
+    const cs = state.cases[c.id];
+    const wo = cs?.workOrder ? state.workOrders[cs.workOrder] : null;
+    return { ...c, state: cs || null, linkedWo: wo ? { id: cs.workOrder, status: wo.status, eta: wo.eta, notes: wo.notes } : null };
+  });
   const escalated = Object.entries(state.workOrders).map(([id, w]) => ({ wo_id: id, ...w }));
   const csvWos = triage.workOrders.map((w) => ({ ...w, source: 'shop', ...(state.workOrders[w.wo_id] || {}) }));
   const dashboardWos = escalated.filter((w) => w.source === 'dashboard');
-  return { ...rest, cases, workOrders: [...dashboardWos, ...csvWos], log: state.log.slice(-50).reverse(), metrics: metrics(), users: USERS, permissions: PERMISSIONS };
+  const order = { 'Pending approval': 0, Approved: 1, Open: 2, Scheduled: 3, Closed: 4 };
+  const workOrders = [...dashboardWos, ...csvWos].sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2));
+  return { ...rest, cases, workOrders, log: state.log.slice(-50).reverse(), metrics: metrics(), users: USERS, permissions: PERMISSIONS };
 }
 
 function handleAction(user, body) {
