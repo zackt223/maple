@@ -16,7 +16,7 @@ Optional:
 
 ```bash
 npm run report   # tonight's top 10 in the terminal
-npm test         # 23 automated checks
+npm test         # 24 automated checks
 ```
 
 To clear all escalations, notes and costs, delete `state.json` and restart.
@@ -56,17 +56,9 @@ Alerts are colour-coded: red = critical, orange = high, yellow = medium, grey = 
 
 Every alert has an **AI note**: one or two plain sentences on what it means and what to do. The notes are written by fixed rules in the code, not by a live AI service, so they need no API key and always give the same answer.
 
-The dashboard also handles problems hidden in the data:
-- **Driver and truck numbers don't match** (D-17 drives V-142). The note on each alert says so.
-- **Trucks used after a stop-the-vehicle fault** (V-137, V-108) get a "find it now" step.
-- **Late data:** each depot shows when it last sent data, and the lists refresh on their own when new data arrives.
-- **Quiet trucks:** vehicles with no alerts for 36+ hours are flagged so someone checks the unit is working. V-102 is known to be out of service.
-- **Nightly unplugs:** unplugs during the vendor's 11 p.m. update hour aren't hidden any more. V-118 unplugs at that hour every night (11 nights) and is the only truck that does, so it's flagged.
-- **Daylight saving:** times follow Eastern time correctly after Nov 1.
-- **Missing readings, daily repeats and duplicates** are explained in the alert's note.
-- **Repairs booked for dispatch morning** (V-158) or too late (V-151) get a hold or "move it up" step.
-- **Device software updates** are requested in phases (4.2.1 first) and don't stop trucks from running.
-- **Background:** the truck photo is blurred so the dashboard is easy to read.
+It also handles problems hidden in the data. These are listed under **AI use** below.
+
+The truck photo in the background is blurred so the dashboard is easy to read.
 
 ## Assumptions I made
 
@@ -89,13 +81,29 @@ The dashboard also handles problems hidden in the data:
 - Filtered alerts by driver, vehicle and yard.
 - Exported the charts as PNG and JPEG.
 - Signed in as each user to confirm they only see and change what they should.
-- Re-checked the numbers with a separate script (`scratch/validate.js`) and 23 automated tests (`npm test`), including one for each problem listed above.
+- Re-checked the numbers with a separate script (`scratch/validate.js`) and 24 automated tests (`npm test`), including one for each edge case listed under AI use.
 
 ## AI use
 - **Tools I used:** Claude Code
 - **What AI did for me:** Built the dashboard, read further into the data to action into the dashboard, set user permissions/visibility, pushed to GitHub.
 - **One thing AI got wrong or incomplete, and how I caught it:** There was no user role for business managers / admin to oversee the entire dashboard and its metrics. Sales or finance also could not look into maintenance work order costs, or audit and cross-check data when quarterly reviews start. After reviewing the build, I noticed the gap and built business manager / admin / sales / finance roles with appropriate permissions for each user (view, edit, delete) to avoid last-minute issues.
 - **Link to / export of my AI session:** Exported from the Claude desktop app and submitted with the Final Submission form. It's not in this public repo because the session log contains a credential that was revoked.
+
+### Edge cases Claude Code caught, and the fixes I approved
+
+| Edge case | Fix |
+| --- | --- |
+| **Work-order IDs could be reused (bug).** Deleting a pending request could let the next request take an existing ID and overwrite that work order. | IDs now always count up from the highest one ever issued. Tested. |
+| **Driver numbers don't match vehicle numbers.** D-17 drives V-142, and V-117 is driven by D-42. | The AI note on each of these alerts says which truck the driver actually drives. |
+| **V-137 went back on the road after it was cleared.** It logged harsh cornering at 10:40 and 11:37, so it may not be parked at the depot. | Trucks used after a stop-the-vehicle fault or repair get a "find it now" step. This also caught V-108, in use at 1:09 p.m. after overheating. |
+| **Late data can reorder tonight's list.** Hamilton may still be holding alerts. | Each depot shows when it last sent data. The dashboard reloads by itself when new data arrives. |
+| **No data isn't the same as no problem.** V-102 has no telematics unit, and an unplugged device looks "quiet". | Trucks with no alerts for 36+ hours are flagged so someone checks the unit (V-128, V-110, V-159). V-102 is marked out of service. |
+| **Real unplugs between 23:00 and midnight were hidden** by the vendor's update-window rule. | They're now shown as low. A truck that does it night after night is high: V-118, 11 nights, the only truck that does this. |
+| **The time zone was fixed at UTC−4.** Daylight time ends Nov 1, after which times would be an hour off. | Times now follow real Eastern time, including the change. Tested. |
+| **96 engine faults have no reading,** so they can't be tracked over time. | The AI note says so on each one. |
+| **V-158's repair is booked for the same morning as dispatch.** | "Hold V-158 from the 6:00 a.m. dispatch" is on tonight's list. V-151's late booking (Oct 5) gets "move it up". |
+| **A 4.3.0 firmware minimum would make 36 of 60 vehicles non-compliant at once.** | Updates are requested in phases (4.2.1 first) and don't stop trucks from running. |
+| **A network outage could be sent to the maintenance shop** (found in the final review). | Network and "not reporting" problems can't be sent to maintenance; they go to IT and the vendor. Tested. |
 
 ## If I had two more days
 

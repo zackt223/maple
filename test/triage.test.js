@@ -232,3 +232,9 @@ test('edge-case fixes', () => {
   assert.ok(r.allAlerts.some((a) => /sent this 2 times/.test(a.aiNote)), 'duplicates explained');
   assert.ok(r.allAlerts.filter((a) => a.type === 'maintenance_due').every((a) => /latest value counts/.test(a.aiNote)));
 });
+
+test('network and reporting cases cannot be sent to the maintenance shop', () => {
+  assert.equal(handleAction(USERS['ops.manager'], { action: 'escalate', caseId: 'C-NET-Hamilton-Depot' })[0], 400);
+  const silent = r.cases.find((c) => c.kind === 'silent');
+  assert.equal(handleAction(USERS['ops.manager'], { action: 'escalate', caseId: silent.id })[0], 400);
+});

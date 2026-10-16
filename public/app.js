@@ -2,8 +2,8 @@
 let DATA = null;
 let USER = store('user');
 let TAB = store('tab');
-let DEPOT = store('depot') || 'all';
 const DEPOTS = ['North Yard', 'Airport Hub', 'Hamilton Depot'];
+let DEPOT = DEPOTS.includes(store('depot')) ? store('depot') : 'all';
 const inDepot = (d) => DEPOT === 'all' || !d || d === DEPOT;
 const OPEN = new Set();
 let filter = { priority: 'all', type: 'all', depot: 'all', limit: 60 };
@@ -206,7 +206,7 @@ function card(c) {
       <span class="badge">${c.rank}</span>
       <div class="grow">
         <div class="title">${esc(c.title)}</div>
-        <div class="sub">${esc(c.vehicle)}${c.vehicleClass ? ' · ' + esc(c.vehicleClass) : ''} · Driver ${esc(c.driver)} · <b>${esc(c.depot)}</b> · ${c.hoursAgo < 48 ? c.hoursAgo + ' h ago' : Math.round(c.hoursAgo / 24) + ' days ago'}</div>
+        <div class="sub">${esc(c.vehicle)}${c.vehicleClass ? ' · ' + esc(c.vehicleClass) : ''} · Driver ${esc(c.driver)} · <b>${esc(c.depot)}</b> · ${c.kind === 'silent' ? 'no alerts for 36+ h' : c.hoursAgo < 48 ? c.hoursAgo + ' h ago' : Math.round(c.hoursAgo / 24) + ' days ago'}</div>
         <div class="capsules"><span class="capsule">${cap(c.priority)}</span>${c.network ? `<span class="capsule net">${c.kind === 'silent' ? 'Not reporting' : 'Network failure'}</span>` : ''}${c.backfill ? '<span class="capsule net">Arrived after network restored</span>' : c.lateArrivals ? '<span class="capsule net">Arrived late</span>' : ''}${c.recurred ? '<span class="capsule critical">After repair</span>' : ''}${statusCapsule(c)}</div>
       </div>
       <span class="chev">›</span>
@@ -226,9 +226,9 @@ function card(c) {
       ${done || !can('case_note') ? '' : `<div class="form" data-case-form="${c.id}">
         <h4>Take action</h4>
         <input class="field" type="text" placeholder="Add a note (optional)" aria-label="Note">
-        ${st.workOrder ? '' : `<div class="seg" role="group" aria-label="Priority for maintenance">${['P1', 'P2', 'P3'].map((p) => `<button type="button" data-prio="${p}" aria-pressed="${(p === 'P1' && c.priority === 'critical') || (p === 'P2' && c.priority !== 'critical')}">${{ P1: 'P1 · Today', P2: 'P2 · 48 h', P3: 'P3 · Next service' }[p]}</button>`).join('')}</div>`}
+        ${st.workOrder || c.network ? '' : `<div class="seg" role="group" aria-label="Priority for maintenance">${['P1', 'P2', 'P3'].map((p) => `<button type="button" data-prio="${p}" aria-pressed="${(p === 'P1' && c.priority === 'critical') || (p === 'P2' && c.priority !== 'critical')}">${{ P1: 'P1 · Today', P2: 'P2 · 48 h', P3: 'P3 · Next service' }[p]}</button>`).join('')}</div>`}
         <div class="btns">
-          ${st.workOrder ? '' : '<button class="btn primary" data-do="escalate">Send to maintenance</button>'}
+          ${st.workOrder || c.network ? '' : '<button class="btn primary" data-do="escalate">Send to maintenance</button>'}
           ${can('refer_safety') && !(c.referral && c.referral.status === 'Open') ? '<button class="btn purple" data-do="refer_safety">Bring in Safety</button>' : ''}
           <button class="btn" data-do="case_note">Add note</button>
           <button class="btn ok" data-do="resolve">Mark resolved</button>

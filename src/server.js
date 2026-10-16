@@ -219,6 +219,7 @@ function handleAction(user, body) {
     const c = triage.cases.find((x) => x.id === body.caseId);
     if (!c) return [404, { error: 'Unknown case' }];
     if (!canSeeCase(role, c)) return [403, { error: 'This case belongs to another team' }];
+    if (action === 'escalate' && c.network) return [400, { error: 'Network and reporting problems go to IT and the vendor, not the maintenance shop' }];
     const ref = referralFor(c.id);
     // Safety works a referred Ops case through the referral, not the Ops case itself.
     const viaReferral = role === 'safety' && !CASE_TEAMS.safety.includes(c.team);
@@ -369,7 +370,7 @@ function handleAction(user, body) {
   return [200, apiData(user)];
 }
 
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.jpg': 'image/jpeg', '.png': 'image/png' };
 
 const server = http.createServer((req, res) => {
   const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
