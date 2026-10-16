@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 process.env.STATE_FILE = path.join(os.tmpdir(), `maple-test-state-${process.pid}.json`);
 const { run, classify, dedupe, RULES } = require('../src/triage');
-const { handleAction, USERS } = require('../src/server');
+const { handleAction, apiData, USERS } = require('../src/server');
 
 const r = run();
 const ctx = { rules: RULES, dtc: { P0217: { urgency: 'Critical', meaning: 'over-temp' }, P0420: { urgency: 'Low', meaning: 'cat' } } };
@@ -74,14 +74,33 @@ test('permissions: maintenance cannot escalate; ops cannot approve', () => {
   const caseId = r.cases[0].id;
   assert.equal(handleAction(USERS['maint.lead'], { action: 'escalate', caseId })[0], 403);
   assert.equal(handleAction(USERS['maint.lead'], { action: 'resolve', caseId })[0], 403);
-  const [code, data] = handleAction(USERS['ops.manager'], { action: 'escalate', caseId, priority: 'P1', note: 'ground it' });
+  const [code] = handleAction(USERS['ops.manager'], { action: 'escalate', caseId, priority: 'P1', note: 'ground it' });
   assert.equal(code, 200);
-  const wo = data.workOrders.find((w) => w.caseId === caseId);
+  const wo = apiData(USERS['maint.lead']).workOrders.find((w) => w.caseId === caseId);
+  assert.ok(wo.request.actions.length, 'maintenance sees what was reported');
   assert.equal(wo.status, 'Pending approval');
   assert.equal(handleAction(USERS['ops.manager'], { action: 'approve_wo', woId: wo.wo_id })[0], 403);
   assert.equal(handleAction(USERS['maint.lead'], { action: 'approve_wo', woId: wo.wo_id })[0], 200);
   assert.equal(handleAction(USERS['maint.lead'], { action: 'set_eta', woId: wo.wo_id, eta: '2026-09-22T12:00' })[0], 200);
   const [, after] = handleAction(USERS['maint.lead'], { action: 'wo_note', woId: wo.wo_id, note: 'Oil pump inspection' });
-  assert.equal(after.metrics.escalated, 1);
-  assert.equal(after.metrics.workflowActions, 4);
+  assert.equal(after.metrics.approved, 1);
+  assert.equal(apiData(USERS['ops.manager']).metrics.escalated, 1);
+  assert.equal(apiData(USERS['ops.manager']).cases[0].linkedWo.eta, '2026-09-22T12:00', 'ops sees maintenance ETA on its case');
+});
+
+test('visibility: each role only receives its own data', () => {
+  const ops = apiData(USERS['ops.manager']);
+  const safety = apiData(USERS['safety.manager']);
+  const maint = apiData(USERS['maint.lead']);
+  assert.ok(!ops.workOrders && !safety.workOrders, 'ops/safety get no maintenance work-order board');
+  assert.ok(!maint.cases && !maint.lowMedium && !maint.drivers, 'maintenance gets no ops/safety cases');
+  assert.ok(ops.cases.every((c) => ['operations', 'maintenance'].includes(c.team)));
+  assert.ok(safety.cases.every((c) => c.team === 'safety'));
+  assert.ok(!ops.drivers, 'driver data is safety-only');
+  assert.equal(apiData(undefined).cases, undefined, 'signed-out gets nothing but the user list');
+});
+
+test('safety cannot act on an ops case', () => {
+  const opsCase = apiData(USERS['ops.manager']).cases[1].id;
+  assert.equal(handleAction(USERS['safety.manager'], { action: 'case_note', caseId: opsCase, note: 'x' })[0], 403);
 });

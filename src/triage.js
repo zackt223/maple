@@ -93,7 +93,8 @@ function classify(a, ctx) {
     case 'engine_fault': {
       const ref = ctx.dtc[a.dtc_code];
       const urgency = ref ? ref.urgency : 'High';
-      if (urgency === 'Critical') return { priority: 'critical', team: 'maintenance', reason: `${a.dtc_code} ${ref.meaning} — reference says stop vehicle` };
+      const reading = a.value ? ` (${a.value} ${a.unit})` : '';
+      if (urgency === 'Critical') return { priority: 'critical', team: 'maintenance', reason: `${a.dtc_code} ${ref.meaning}${reading} — reference says stop vehicle` };
       return { priority: 'high', team: 'maintenance', reason: `${a.dtc_code} ${ref ? ref.meaning : 'unknown code'} (reference: ${urgency})` };
     }
     case 'maintenance_due':
@@ -188,6 +189,17 @@ const ACTIONS = {
   ],
 };
 
+// Facts from vehicles.csv, vendor_notes.md and the latency check that change how a case should be read.
+function contextNotes(c, v, ctx) {
+  const notes = [];
+  if (c.depot === 'Hamilton Depot') notes.push('Hamilton Depot alerts are arriving up to 30 h late. There may be newer events not shown yet.');
+  if (['braking', 'speeding'].includes(c.kind) && v?.device_firmware === '4.2.1') notes.push('Firmware 4.2.1 over-reports light braking, but these events are serious-level, so they are real.');
+  if (c.kind === 'braking' && v?.device_firmware !== '4.2.1') notes.push(`Firmware ${v?.device_firmware} is the less sensitive version, so these counts are not inflated.`);
+  if (c.kind === 'speeding' && c.evidence.some((e) => /posted limit unknown/.test(e.reason))) notes.push('Some events have no posted limit from the map provider, so absolute speed is used.');
+  if (v?.vehicle_class === 'Class 8 tractor' && c.kind === 'engine') notes.push('Class 8 tractor: a roadside failure blocks a full load. Inspect before dispatch.');
+  return notes;
+}
+
 function buildCases(alerts, ctx) {
   const groups = new Map();
   for (const a of alerts) {
@@ -252,13 +264,15 @@ function buildCases(alerts, ctx) {
       evidence: list.slice(0, 8).map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason, vendor: a.vendor_severity, wo: a.wo?.note })),
     };
     c.actions = ACTIONS[actionKey](c);
+    c.vehicleClass = v?.vehicle_class;
+    c.context = contextNotes(c, v, ctx);
     cases.push(c);
   }
   // Engine cases also show faults the shop already "fixed" on that vehicle — the history matters (V-137).
   for (const c of cases) {
     if (c.kind !== 'engine') continue;
     c.history = alerts.filter((a) => a.vehicle_id === c.vehicle && a.alert_type === 'engine_fault' && a.wo?.state === 'resolved')
-      .map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: `${a.reason} — ${a.value ? a.value + ' ' + a.unit : ''}`, vendor: a.vendor_severity, wo: a.wo.note }));
+      .map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason, vendor: a.vendor_severity, wo: a.wo.note }));
   }
   cases.sort((a, b) => b.score - a.score);
   cases.forEach((c, i) => { c.rank = i + 1; c.tonight = i < ctx.rules.dailyCapacity; });

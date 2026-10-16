@@ -27,46 +27,87 @@ const emptyState = () => ({ cases: {}, workOrders: {}, log: [] });
 let state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) : emptyState();
 const save = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 
-function metrics() {
-  const total = triage.cases.length;
-  const caseStates = Object.values(state.cases);
-  const resolved = caseStates.filter((c) => c.status === 'resolved').length;
-  const escalated = caseStates.filter((c) => c.status === 'escalated').length;
-  const actioned = triage.cases.filter((c) => state.cases[c.id]).length;
-  const tonight = triage.cases.filter((c) => c.tonight);
-  const tonightActioned = tonight.filter((c) => state.cases[c.id]).length;
-  const actions = state.log.length;
+// What each role is allowed to SEE. Enforced here: other roles' data is never sent to the browser.
+// Operations owns vehicle availability (device + mechanical issues it escalates); Safety owns driver behaviour;
+// Maintenance only sees its work-order queue.
+const CASE_TEAMS = { operations: ['operations', 'maintenance'], safety: ['safety'], maintenance: [] };
+const ALERT_TEAMS = { operations: ['operations'], safety: ['safety'], maintenance: [] };
+const canSeeCase = (role, c) => CASE_TEAMS[role].includes(c.team);
+
+function allWorkOrders() {
+  const dashboardWos = Object.entries(state.workOrders).filter(([, w]) => w.source === 'dashboard').map(([id, w]) => {
+    // Maintenance gets what it needs to do the job: the reported steps, evidence and repair history.
+    const c = triage.cases.find((x) => x.id === w.caseId);
+    const request = c ? { actions: c.actions, evidence: c.evidence.slice(0, 5), history: c.history || [], notes: state.cases[c.id]?.notes || [] } : null;
+    return { wo_id: id, ...w, request };
+  });
+  const csvWos = triage.workOrders.map((w) => ({ ...w, source: 'shop', ...(state.workOrders[w.wo_id] || {}) }));
+  const order = { 'Pending approval': 0, Approved: 1, Open: 2, Scheduled: 3, Closed: 4 };
+  return [...dashboardWos, ...csvWos].sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2));
+}
+
+function scopedCases(role) {
+  const capacity = triage.rules.dailyCapacity;
+  return triage.cases.filter((c) => canSeeCase(role, c)).map((c, i) => {
+    const cs = state.cases[c.id];
+    const wo = cs?.workOrder ? state.workOrders[cs.workOrder] : null;
+    return { ...c, rank: i + 1, tonight: i < capacity, state: cs || null,
+      linkedWo: wo ? { id: cs.workOrder, status: wo.status, eta: wo.eta, notes: wo.notes } : null };
+  });
+}
+
+function metrics(role, cases, workOrders) {
+  if (role === 'maintenance') {
+    const fromDashboard = workOrders.filter((w) => w.source === 'dashboard');
+    return {
+      pending: fromDashboard.filter((w) => w.status === 'Pending approval').length,
+      approved: fromDashboard.filter((w) => w.status === 'Approved').length,
+      withEta: workOrders.filter((w) => w.eta).length,
+      escalationsReceived: fromDashboard.length,
+      workflowActions: state.log.filter((l) => l.role === 'maintenance').length,
+    };
+  }
+  const total = cases.length;
+  const resolved = cases.filter((c) => c.state?.status === 'resolved').length;
+  const tonight = cases.filter((c) => c.tonight);
+  const tonightActioned = tonight.filter((c) => c.state).length;
+  const ids = new Set(cases.map((c) => c.id));
   return {
     highCriticalSent: total,
+    resolved,
+    resolvedRate: total ? +(resolved / total * 100).toFixed(1) : 0,
+    escalated: cases.filter((c) => c.state?.workOrder).length,
     tonightQueue: tonight.length,
     tonightActioned,
-    resolved,
-    escalated,
-    resolvedRate: total ? +(resolved / total * 100).toFixed(1) : 0,
-    workflowActions: actions,
-    casesActioned: actioned,
     // Guardrail: are we sending more high/critical items than the team actually works?
-    actionCoveragePct: total ? +(actioned / total * 100).toFixed(1) : 0,
-    tonightCoveragePct: tonight.length ? +(tonightActioned / tonight.length * 100).toFixed(1) : 0,
+    tonightCoveragePct: tonight.length ? Math.round(tonightActioned / tonight.length * 100) : 0,
     guardrailBreached: tonightActioned < tonight.length,
-    rawAlerts: triage.quality.rawAlerts,
+    workflowActions: state.log.filter((l) => ids.has(l.target)).length,
   };
 }
 
-function apiData() {
-  const { _alerts, ...rest } = triage;
-  const cases = triage.cases.map((c) => {
-    const cs = state.cases[c.id];
-    const wo = cs?.workOrder ? state.workOrders[cs.workOrder] : null;
-    return { ...c, state: cs || null, linkedWo: wo ? { id: cs.workOrder, status: wo.status, eta: wo.eta, notes: wo.notes } : null };
-  });
-  const escalated = Object.entries(state.workOrders).map(([id, w]) => ({ wo_id: id, ...w }));
-  const csvWos = triage.workOrders.map((w) => ({ ...w, source: 'shop', ...(state.workOrders[w.wo_id] || {}) }));
-  const dashboardWos = escalated.filter((w) => w.source === 'dashboard');
-  const order = { 'Pending approval': 0, Approved: 1, Open: 2, Scheduled: 3, Closed: 4 };
-  const workOrders = [...dashboardWos, ...csvWos].sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2));
-  return { ...rest, cases, workOrders, log: state.log.slice(-50).reverse(), metrics: metrics(), users: USERS, permissions: PERMISSIONS };
+function apiData(user) {
+  if (!user) return { users: USERS };
+  const role = user.role;
+  const base = { generatedFor: triage.generatedFor, rules: triage.rules, user: { ...user }, permissions: PERMISSIONS[role] };
+  if (role === 'maintenance') {
+    const workOrders = allWorkOrders();
+    const woIds = new Set(workOrders.map((w) => w.wo_id));
+    return { ...base, workOrders, log: state.log.filter((l) => woIds.has(l.target)).slice(-50).reverse(), metrics: metrics(role, [], workOrders) };
+  }
+  const cases = scopedCases(role);
+  const ids = new Set(cases.map((c) => c.id));
+  const out = {
+    ...base, cases,
+    lowMedium: triage.lowMedium.filter((a) => ALERT_TEAMS[role].includes(teamOf(a.type))),
+    log: state.log.filter((l) => ids.has(l.target)).slice(-50).reverse(),
+    metrics: metrics(role, cases),
+  };
+  if (role === 'safety') out.drivers = triage.drivers;
+  return out;
 }
+
+const teamOf = (type) => (['speeding', 'harsh_braking', 'harsh_accel', 'harsh_cornering'].includes(type) ? 'safety' : 'operations');
 
 function handleAction(user, body) {
   const role = user.role;
@@ -78,6 +119,7 @@ function handleAction(user, body) {
   if (['escalate', 'resolve', 'case_note'].includes(action)) {
     const c = triage.cases.find((x) => x.id === body.caseId);
     if (!c) return [404, { error: 'Unknown case' }];
+    if (!canSeeCase(role, c)) return [403, { error: `This case belongs to another team` }];
     const cs = state.cases[c.id] ||= { notes: [] };
     entry.target = c.id;
     if (action === 'escalate') {
@@ -126,14 +168,14 @@ function handleAction(user, body) {
   }
   state.log.push(entry);
   save();
-  return [200, apiData()];
+  return [200, apiData(user)];
 }
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
 const server = http.createServer((req, res) => {
   const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
-  if (req.url === '/api/data') return send(200, apiData());
+  if (req.url === '/api/data') return send(200, apiData(USERS[req.headers['x-user']]));
   if (req.url === '/api/action' && req.method === 'POST') {
     const user = USERS[req.headers['x-user']];
     if (!user) return send(401, { error: 'Sign in first' });
@@ -145,7 +187,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  if (req.url === '/api/reset' && req.method === 'POST') { state = emptyState(); save(); return send(200, apiData()); }
+  
   const file = path.join(PUBLIC, req.url === '/' ? 'index.html' : path.normalize(req.url).replace(/^([\\/])+/, ''));
   if (!file.startsWith(PUBLIC) || !fs.existsSync(file)) { res.writeHead(404); return res.end('Not found'); }
   res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'text/plain' });
@@ -155,4 +197,4 @@ const server = http.createServer((req, res) => {
 if (require.main === module) {
   server.listen(PORT, () => console.log(`Maple Freight triage dashboard → http://localhost:${PORT}`));
 }
-module.exports = { handleAction, USERS, PERMISSIONS, server };
+module.exports = { handleAction, apiData, USERS, PERMISSIONS, server };
