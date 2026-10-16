@@ -258,3 +258,5 @@ button { font: inherit; color: inherit; }
 .top-inner { justify-content: flex-start; }
 .top-inner .eyebrow { margin-left: auto; }
 @media (max-width: 1500px) { .top-inner .eyebrow { display: none; } .userpill { margin-left: auto; } }
+.exp { display: inline-flex; gap: 6px; margin-left: auto; }
+.panel-head .seg + .exp { margin-left: 8px; }

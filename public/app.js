@@ -423,14 +423,14 @@ function insightsView(title = 'Insights', lede) {
         <div class="kpi-row"><div class="kpi-box"><div class="v">${today.total}</div><div class="s">alerts today</div></div><div class="kpi-box lime"><div class="v">${al.length ? Math.round(al.filter((a) => a.priority === 'high' || a.priority === 'critical').length / al.length * 100) : 0}%</div><div class="s">high/critical share</div></div></div>
         <div class="kpi-row"><div class="kpi-box"><div class="v">${late}</div><div class="s">arrived late</div></div><div class="kpi-box"><div class="v">${al.filter((a) => a.priority === 'critical').length}</div><div class="s">critical (14 d)</div></div></div>
       </div>
-      <div class="panel glass span2"><div class="panel-head"><div class="panel-title">Overview</div><span class="sub">High & critical alerts per day</span></div>${Charts.line(s, 'highCritical', { label: 'High and critical alerts per day' })}</div>
+      <div class="panel glass span2" data-chart-title="High & critical alerts per day ${where()}"><div class="panel-head"><div class="panel-title">Overview</div><span class="sub">High & critical alerts per day</span><span class="exp"><button class="btn sm" data-chart-export="png" data-name="overview">PNG</button><button class="btn sm" data-chart-export="jpeg" data-name="overview">JPEG</button></span></div>${Charts.line(s, 'highCritical', { label: 'High and critical alerts per day' })}</div>
     </section>
     <section class="grid-3">
-      <div class="panel glass span2"><div class="panel-head"><div class="panel-title">General statistics</div>
+      <div class="panel glass span2" data-chart-title="All alerts vs high & critical per day ${where()}"><div class="panel-head"><div class="panel-title">General statistics</div><span class="exp"><button class="btn sm" data-chart-export="png" data-name="general-statistics">PNG</button><button class="btn sm" data-chart-export="jpeg" data-name="general-statistics">JPEG</button></span>
         <div class="legend">${depotShare.map((x, i) => `<span><i style="background:${['#d7f23c', '#ff6b8a', '#ff8a5c'][i]}"></i>${x.d} <b>${Math.round(x.n / tot * 100)}%</b></span>`).join('')}</div></div>
         ${Charts.hatch(s, 'total', 'highCritical', { label: 'All alerts vs high and critical per day' })}
         <p class="sub" style="margin:4px 0 0">Top line: all alerts. Bottom line: high & critical. The hatched band is the noise the triage removes from tonight’s list.</p></div>
-      <div class="panel glass"><div class="panel-head"><div class="panel-title">Relative dominance</div></div>${Charts.polar(parts, { label: 'High and critical alerts by type' })}<p class="sub" style="margin:0">High & critical alerts by type ${where()}.</p></div>
+      <div class="panel glass" data-chart-title="High & critical alerts by type ${where()}"><div class="panel-head"><div class="panel-title">Relative dominance</div><span class="exp"><button class="btn sm" data-chart-export="png" data-name="relative-dominance">PNG</button><button class="btn sm" data-chart-export="jpeg" data-name="relative-dominance">JPEG</button></span></div>${Charts.polar(parts, { label: 'High and critical alerts by type' })}<p class="sub" style="margin:0">High & critical alerts by type ${where()}.</p></div>
     </section>`;
 }
 
@@ -492,6 +492,44 @@ function accessView() {
     `<div class="table-wrap panel glass"><table class="tbl"><thead><tr><th>Role</th><th>View</th><th>Edit</th><th>Delete</th></tr></thead><tbody>
       ${rows.map(([r, a]) => `<tr><td><b>${name[r]}</b></td><td>${esc(a.view)}</td><td>${esc(a.edit)}</td><td>${esc(a.delete)}</td></tr>`).join('')}
     </tbody></table></div>`;
+}
+
+// Chart → PNG/JPEG for decks: copy the SVG, inline its styles, add a title, draw it on a canvas at 3×.
+const CHART_CSS = '.ax{fill:#bdbdb6;font:10px system-ui,sans-serif}.ax.small{font-size:9px}.grid{stroke:rgba(255,255,255,.08)}.band{fill:rgba(255,255,255,.07)}.lime-line{fill:none;stroke:#d7f23c;stroke-width:2.5}.thin{fill:none;stroke:rgba(215,242,60,.55);stroke-width:1.2}.dot-lime{fill:#d7f23c}.dot-hi{fill:#1b1b1b;stroke:#d7f23c;stroke-width:3}.pill{fill:rgba(255,255,255,.92)}.pill.solid{fill:#fff}.pill-t{fill:#111;font:700 10px system-ui,sans-serif}.ttl{fill:#f4f4f2;font:600 14px system-ui,sans-serif}.cap{fill:#9a9a96;font:10px system-ui,sans-serif}';
+function chartImage(panel, fmt) {
+  const svg = panel.querySelector('svg.chart');
+  const vb = svg.viewBox.baseVal;
+  const top = 34, pad = 16, W = vb.width + pad * 2, H = vb.height + top + pad + 14;
+  const inner = new XMLSerializer().serializeToString(svg).replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+  const title = esc(panel.dataset.chartTitle || 'Maple Freight');
+  const src = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><style>${CHART_CSS}</style>
+    <rect width="100%" height="100%" fill="#161616"/><text x="${pad}" y="22" class="ttl">${title}</text>
+    <svg x="${pad}" y="${top}" width="${vb.width}" height="${vb.height}" viewBox="${vb.x} ${vb.y} ${vb.width} ${vb.height}">${inner}</svg>
+    <text x="${pad}" y="${H - 6}" class="cap">Maple Freight · telematics alerts Sep 8–21, 2026 · ${esc(DATA.generatedFor)}</text></svg>`;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const k = 3, c = document.createElement('canvas');
+      c.width = W * k; c.height = H * k;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#161616'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => (b ? resolve(b) : reject(new Error('Export failed'))), 'image/' + fmt, 0.92);
+    };
+    img.onerror = () => reject(new Error('Export failed'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(src);
+  });
+}
+async function exportChart(btn) {
+  try {
+    const blob = await chartImage(btn.closest('[data-chart-title]'), btn.dataset.chartExport);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `maple-${btn.dataset.name}-${DEPOT === 'all' ? 'all-depots' : DEPOT.toLowerCase().replace(/ /g, '-')}.${btn.dataset.chartExport === 'jpeg' ? 'jpg' : 'png'}`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    toast('Chart exported');
+  } catch (e) { toast(e.message, true); }
 }
 
 function exportCsv(kind) {
@@ -600,6 +638,7 @@ function wire() {
   document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => { AF.range = b.dataset.range; AF.page = 0; render(); }));
   document.querySelectorAll('[data-page]').forEach((b) => b.addEventListener('click', () => { AF.page += +b.dataset.page; render(); }));
   document.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', () => exportCsv(b.dataset.export)));
+  document.querySelectorAll('[data-chart-export]').forEach((b) => b.addEventListener('click', () => exportChart(b)));
   document.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {
     if (!confirm(b.textContent.trim() + '?')) return;
     act({ action: b.dataset.del, woId: b.dataset.wo, referralId: b.dataset.ref });
