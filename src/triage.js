@@ -5,7 +5,8 @@ const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 // Export taken Monday Sep 21 2026, 6:00 p.m. Eastern (EDT = UTC-4).
-const NOW_UTC = new Date('2026-09-21T22:00:00Z');
+// Hamilton's gateway reconnected at 6:47 p.m. ET and delivered held alerts (hamilton_backfill.csv), so data is as of then.
+const NOW_UTC = new Date('2026-09-21T22:47:00Z');
 const EDT_OFFSET_H = -4;
 
 const RULES = {
@@ -14,6 +15,8 @@ const RULES = {
   brakingMediumG: 0.45,      // below this on firmware 4.2.1 is mostly sensor sensitivity noise
   otaWindowHourLocal: 23,    // vendor OTA window 23:00-00:00 local: unplug/camera alerts expected
   dailyCapacity: 10,         // ops can act on ~10 things a day
+  speedingOverLimitHigh: 40, // 40+ km/h over a known posted limit is extreme even below 115 (e.g. 104 in a 60)
+  lateMinutes: 60,           // received > 60 min after the event = held by a communication/network failure
 };
 
 function parseCsv(file) {
@@ -66,7 +69,8 @@ function loadAll() {
     isDevice: /telematics|harness|obd/i.test(w.work_done + w.technician_note),
     isService: /service|oil and filters/i.test(w.work_done),
   }));
-  const raw = parseCsv('alerts.csv');
+  const backfill = fs.existsSync(path.join(DATA_DIR, 'hamilton_backfill.csv')) ? parseCsv('hamilton_backfill.csv').map((a) => ({ ...a, backfill: true })) : [];
+  const raw = [...parseCsv('alerts.csv'), ...backfill];
   return { vehicles, vehicleById, dtc, workOrders, raw };
 }
 
@@ -107,6 +111,7 @@ function classify(a, ctx) {
       if (hourLocal === ctx.rules.otaWindowHourLocal) return { priority: 'suppressed', team: 'operations', reason: 'During nightly OTA window — expected' };
       return { priority: 'medium', team: 'operations', reason: 'Camera offline during operating hours' };
     case 'speeding':
+      if (a.posted_limit_kmh && v - +a.posted_limit_kmh >= ctx.rules.speedingOverLimitHigh) return { priority: 'high', team: 'safety', reason: `${v} km/h in a ${a.posted_limit_kmh} zone — ${v - +a.posted_limit_kmh} km/h over the limit` };
       if (v > ctx.rules.speedingHighKmh) return { priority: 'high', team: 'safety', reason: `${v} km/h — above ${ctx.rules.speedingHighKmh} km/h` + (a.posted_limit_kmh ? ` (posted ${a.posted_limit_kmh})` : ' (posted limit unknown)') };
       return { priority: 'medium', team: 'safety', reason: `${v} km/h` + (a.posted_limit_kmh ? ` in a ${a.posted_limit_kmh} zone` : ' (posted limit unknown)') };
     case 'harsh_braking':
@@ -200,6 +205,44 @@ function contextNotes(c, v, ctx) {
   return notes;
 }
 
+// Communication / network failures: alerts that reached the platform long after they happened, per depot.
+function networkCases(alerts, ctx) {
+  const out = [];
+  const late = alerts.filter((a) => a.lagMin > ctx.rules.lateMinutes);
+  for (const depot of ['North Yard', 'Airport Hub', 'Hamilton Depot']) {
+    const list = late.filter((a) => a.depot === depot).sort((x, y) => y.received_time_utc.localeCompare(x.received_time_utc));
+    if (!list.length) continue;
+    const held = list.filter((a) => a.backfill);
+    const heldBad = held.filter((a) => ['critical', 'high'].includes(a.priority));
+    const maxLag = Math.max(...list.map((a) => a.lagMin)) / 60;
+    const latest = list[0];
+    const isOutage = held.length > 0;
+    const title = isOutage
+      ? `${depot} gateway outage: ${held.length} alerts held until ${localStr(latest.received_time_utc).slice(11)} ET`
+      : `${depot} delayed data: ${list.length} alerts arrived over 1 h late (max ${maxLag.toFixed(1)} h)`;
+    const c = {
+      id: 'C-NET-' + depot.replace(/ /g, '-'), kind: 'network', title,
+      score: (isOutage ? 1100 : 400) + list.length + (heldBad.length * 50),
+      priority: isOutage && heldBad.some((a) => a.priority === 'critical') ? 'critical' : 'high',
+      team: 'operations', vehicle: `${new Set(list.map((a) => a.vehicle_id)).size} vehicles`, driver: '—', depot,
+      latestLocal: localStr(latest.received_time_utc), hoursAgo: Math.max(0, Math.round(hoursAgo(latest.received_time_utc))),
+      count: list.length, recurred: false, workOrder: null, network: true,
+      evidence: (held.length ? held : list).slice(0, 10).map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: `${a.vehicle_id} ${a.alert_type.replace(/_/g, ' ')}: ${a.reason} — arrived ${(a.lagMin / 60).toFixed(1)} h late`, vendor: a.vendor_severity })),
+      actions: isOutage ? [
+        `Operations: review the ${held.length} alerts that arrived after the gateway came back (${heldBad.length} are high or critical); they are now ranked in the normal queue.`,
+        `Operations: treat ${depot} as possibly incomplete. Check vehicles in person before the 6:00 a.m. dispatch.`,
+        'IT: open a ticket with TrackLine about the depot gateway (the vendor reports normal connectivity).',
+      ] : [
+        `Operations: ${depot} data can lag up to ${maxLag.toFixed(0)} h. Confirm critical issues by phone or in person.`,
+        'IT: raise the delay pattern with TrackLine.',
+      ],
+      context: [`${list.length} delayed alerts at ${depot} in 14 days; worst delay ${maxLag.toFixed(1)} h.`],
+    };
+    out.push(c);
+  }
+  return out;
+}
+
 function buildCases(alerts, ctx) {
   const groups = new Map();
   for (const a of alerts) {
@@ -251,7 +294,10 @@ function buildCases(alerts, ctx) {
       score += (max - 0.6) * 400 + list.length * 25;
       title = `${latest.driver_id} emergency braking ×${list.length} (max ${max} g)`;
     }
+    const lateCount = list.filter((a) => a.lagMin > ctx.rules.lateMinutes).length;
+    if (list.some((a) => a.backfill)) score += 250; // held by the outage: nobody has seen these yet
     const c = {
+      lateArrivals: lateCount, backfill: list.some((a) => a.backfill),
       id: 'C-' + key.replace('|', '-'),
       kind, title, score: Math.round(score),
       priority: isCritical || recurred ? 'critical' : 'high',
@@ -261,7 +307,7 @@ function buildCases(alerts, ctx) {
       hoursAgo: Math.round(hrs),
       count: list.length,
       recurred, workOrder: openWo ? openWo.wo : (recurred ? list.find((a) => a.wo)?.wo : null),
-      evidence: list.slice(0, 8).map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason, vendor: a.vendor_severity, wo: a.wo?.note })),
+      evidence: list.slice(0, 8).map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason + (a.lagMin > ctx.rules.lateMinutes ? ` (arrived ${(a.lagMin / 60).toFixed(1)} h late${a.backfill ? ', after Hamilton gateway restored 6:47 p.m.' : ''})` : ''), vendor: a.vendor_severity, wo: a.wo?.note })),
     };
     c.actions = ACTIONS[actionKey](c);
     c.vehicleClass = v?.vehicle_class;
@@ -274,6 +320,7 @@ function buildCases(alerts, ctx) {
     c.history = alerts.filter((a) => a.vehicle_id === c.vehicle && a.alert_type === 'engine_fault' && a.wo?.state === 'resolved')
       .map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason, vendor: a.vendor_severity, wo: a.wo.note }));
   }
+  cases.push(...networkCases(alerts, ctx));
   cases.sort((a, b) => b.score - a.score);
   cases.forEach((c, i) => { c.rank = i + 1; c.tonight = i < ctx.rules.dailyCapacity; });
   return cases;
@@ -329,21 +376,23 @@ function run() {
     const cls = classify(a, ctx);
     const out = { ...a, ...cls, depot: ctx.vehicleById[a.vehicle_id]?.depot, local: localStr(a.event_time_utc) };
     out.wo = matchWorkOrder(a, cls, ctx.workOrders);
+    out.lagMin = (new Date(a.received_time_utc) - new Date(a.event_time_utc)) / 60000;
     return out;
   });
   const cases = buildCases(alerts, ctx);
   const counts = {};
   for (const a of alerts) counts[a.priority] = (counts[a.priority] || 0) + 1;
   return {
-    generatedFor: 'Mon Sep 21 2026, 6:00 p.m. Eastern',
+    generatedFor: 'Mon Sep 21 2026, 6:47 p.m. ET (incl. Hamilton backfill)',
     rules: RULES,
     counts,
     cases,
     lowMedium: alerts.filter((a) => ['medium', 'low'].includes(a.priority) && !a.wo)
       .sort((a, b) => b.event_time_utc.localeCompare(a.event_time_utc))
-      .map((a) => ({ id: a.alert_id, type: a.alert_type, priority: a.priority, vehicle: a.vehicle_id, driver: a.driver_id, depot: a.depot, when: a.local, reason: a.reason, vendor: a.vendor_severity })),
+      .map((a) => ({ late: a.lagMin > RULES.lateMinutes, backfill: !!a.backfill, vehicleClass: ctx.vehicleById[a.vehicle_id]?.vehicle_class, id: a.alert_id, type: a.alert_type, priority: a.priority, vehicle: a.vehicle_id, driver: a.driver_id, depot: a.depot, when: a.local, reason: a.reason, vendor: a.vendor_severity })),
     workOrders: ctx.workOrders.map(({ openedUtc, closedUtc, codes, isDevice, isService, ...w }) => w),
     vehicles: ctx.vehicles,
+    depots: ['North Yard', 'Airport Hub', 'Hamilton Depot'],
     drivers: driverStats(alerts, ctx),
     quality: dataQuality(ctx.raw, dupes, alerts, ctx),
     _alerts: alerts,

@@ -13,6 +13,7 @@ const USERS = {
   'ops.manager':    { name: 'Operations Manager', role: 'operations' },
   'safety.manager': { name: 'Safety Manager',     role: 'safety' },
   'maint.lead':     { name: 'Maintenance Lead',   role: 'maintenance' },
+  'biz.admin':      { name: 'Business Manager',   role: 'admin' },
 };
 
 // What each role may do. Checked server-side; the UI only hides buttons for convenience.
@@ -20,6 +21,7 @@ const PERMISSIONS = {
   operations:  ['escalate', 'resolve', 'case_note', 'refer_safety'],
   safety:      ['escalate', 'resolve', 'case_note', 'referral_note', 'close_referral', 'advise_maintenance', 'set_min_firmware', 'request_firmware_update'],
   maintenance: ['approve_wo', 'set_eta', 'wo_note'],
+  admin:       [], // oversees every dashboard and metric, read-only
 };
 
 // Vendor notes on each firmware release (vendor_notes.md) plus what the data showed.
@@ -37,8 +39,9 @@ const save = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
 // What each role is allowed to SEE. Other roles' dashboards are never sent to the browser.
 // Operations owns vehicle availability; Safety owns driver behaviour (plus cases Ops refers to it);
 // Maintenance only sees its work-order queue.
-const CASE_TEAMS = { operations: ['operations', 'maintenance'], safety: ['safety'], maintenance: [] };
-const ALERT_TEAMS = { operations: ['operations'], safety: ['safety'], maintenance: [] };
+const CASE_TEAMS = { operations: ['operations', 'maintenance'], safety: ['safety'], maintenance: [], admin: [] };
+const ALERT_TEAMS = { operations: ['operations'], safety: ['safety'], maintenance: [], admin: [] };
+const depotOf = Object.fromEntries(triage.vehicles.map((v) => [v.vehicle_id, v.depot]));
 const referralFor = (caseId) => Object.entries(state.referrals).find(([, r]) => r.caseId === caseId);
 const canSeeCase = (role, c) => CASE_TEAMS[role].includes(c.team) || (role === 'safety' && !!referralFor(c.id));
 const teamOf = (type) => (['speeding', 'harsh_braking', 'harsh_accel', 'harsh_cornering'].includes(type) ? 'safety' : 'operations');
@@ -64,6 +67,7 @@ function allWorkOrders() {
     return { wo_id: id, ...w, request };
   });
   const csvWos = triage.workOrders.map((w) => ({ ...w, source: 'shop', ...(state.workOrders[w.wo_id] || {}) }));
+  for (const w of [...dashboardWos, ...csvWos]) w.depot = depotOf[w.vehicle_id] || w.depotName || null;
   const order = { 'Pending approval': 0, Approved: 1, Open: 2, Scheduled: 3, Closed: 4 };
   return [...dashboardWos, ...csvWos].sort((a, b) => (order[a.status] ?? 2) - (order[b.status] ?? 2));
 }
@@ -140,10 +144,16 @@ function apiData(user) {
     const workOrders = allWorkOrders();
     return { ...base, workOrders, log, metrics: metrics(role, [], workOrders) };
   }
+  if (role === 'admin') {
+    // Business Manager: every team's dashboard and metrics, read-only.
+    const teams = {};
+    for (const r of ['operations', 'safety', 'maintenance']) teams[r] = apiData(Object.values(USERS).find((u) => u.role === r));
+    return { ...base, teams, log: state.log.slice(-80).reverse(), depots: triage.depots, quality: triage.quality, counts: triage.counts };
+  }
   const cases = scopedCases(role);
   const out = { ...base, cases, lowMedium: triage.lowMedium.filter((a) => ALERT_TEAMS[role].includes(teamOf(a.type))), log, metrics: metrics(role, cases) };
   if (role === 'safety') {
-    out.drivers = triage.drivers;
+    out.drivers = triage.drivers.map((d) => ({ ...d, depot: depotOf[d.vehicle] }));
     out.referrals = referrals();
     out.firmware = firmware();
     out.vehicles = triage.vehicles.map((v) => ({ id: v.vehicle_id, depot: v.depot, driver: v.assigned_driver, firmware: v.device_firmware, cls: v.vehicle_class }));
@@ -242,7 +252,7 @@ function handleAction(user, body) {
     const byDepot = {};
     todo.forEach((v) => (byDepot[v.depot] ||= []).push(v));
     const created = Object.entries(byDepot).map(([depot, list]) => newWorkOrder(user, at, {
-      vehicle_id: `${list.length} vehicles · ${depot}`, priority, firmwareTarget: min, vehicles: list.map((v) => v.vehicle),
+      vehicle_id: `${list.length} vehicles · ${depot}`, depotName: depot, priority, firmwareTarget: min, vehicles: list.map((v) => v.vehicle),
       work_done: `Update telematics firmware to ${min} or newer`,
       request: { title: 'Firmware policy', actions: [`Update telematics firmware to ${min}+ on: ${list.map((v) => `${v.vehicle} (${v.firmware})`).join(', ')}`, 'Schedule during the nightly window or before morning dispatch.', ...(body.note ? [body.note] : [])], evidence: [], history: [], context: [FIRMWARE_NOTES[min]], notes: [] },
     }));

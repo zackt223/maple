@@ -43,13 +43,13 @@ test('dedupe removes identical events with different alert_ids', () => {
 });
 
 test('dataset: counts recompute', () => {
-  assert.equal(r.quality.rawAlerts, 2370);
+  assert.equal(r.quality.rawAlerts, 2380); // 2,370 export + 10 Hamilton backfill
   assert.equal(r.quality.duplicates, 134);
-  assert.equal(r.quality.uniqueAlerts, 2236);
+  assert.equal(r.quality.uniqueAlerts, 2246);
 });
 
-test('V-137 is the #1 case: P0524 after the sensor repair', () => {
-  const top = r.cases[0];
+test('V-137 is critical: P0524 after the sensor repair', () => {
+  const top = r.cases.find((c) => c.vehicle === 'V-137' && c.kind === 'engine');
   assert.equal(top.vehicle, 'V-137');
   assert.equal(top.priority, 'critical');
   assert.ok(top.recurred);
@@ -137,4 +137,20 @@ test('safety advisory and firmware minimum create maintenance work orders', () =
   assert.equal(apiData(safety).firmware.belowMinimum.every((v) => v.requested), true);
   assert.equal(handleAction(safety, { action: 'request_firmware_update' })[0], 409, 'no duplicate requests');
   assert.ok(!apiData(USERS['ops.manager']).firmware, 'firmware policy is a safety view');
+});
+
+test('Hamilton backfill: V-108 overheat + oil pressure is the top case; outage is a network case', () => {
+  assert.equal(r.cases[0].vehicle, 'V-108');
+  assert.equal(r.cases[0].priority, 'critical');
+  assert.ok(r.cases[0].backfill);
+  const net = r.cases.find((c) => c.id === 'C-NET-Hamilton-Depot');
+  assert.ok(net && net.priority === 'critical' && /10 alerts held/.test(net.title));
+  assert.ok(!r.cases.some((c) => c.id === 'C-NET-Airport-Hub'), 'Airport Hub had no delays');
+  assert.equal(classify(alert({ value: '104', posted_limit_kmh: '60' }), ctx).priority, 'high', '44 over the limit is extreme');
+});
+
+test('business manager sees every team, read-only', () => {
+  const admin = apiData(USERS['biz.admin']);
+  assert.ok(admin.teams.operations.cases && admin.teams.safety.drivers && admin.teams.maintenance.workOrders);
+  assert.equal(handleAction(USERS['biz.admin'], { action: 'case_note', caseId: r.cases[0].id, note: 'x' })[0], 403);
 });
