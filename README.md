@@ -12,6 +12,8 @@ npm start
 
 Open http://localhost:3000, pick a user, and press **Enter** on the password screen (no password is set).
 
+**View online (no install):** https://zackt223.github.io/maple/. This copy runs entirely in the browser, and each browser keeps its own escalations, notes and costs. For a team sharing one live board, use `npm start`. After changing anything in `data/` or `public/`, run `npm run build:pages` and commit `docs/` to update the online copy.
+
 Optional:
 
 ```bash
