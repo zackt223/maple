@@ -104,3 +104,37 @@ test('safety cannot act on an ops case', () => {
   const opsCase = apiData(USERS['ops.manager']).cases[1].id;
   assert.equal(handleAction(USERS['safety.manager'], { action: 'case_note', caseId: opsCase, note: 'x' })[0], 403);
 });
+
+test('ops can bring in safety with a note; safety responds and can send to maintenance', () => {
+  const ops = USERS['ops.manager'], safety = USERS['safety.manager'], maint = USERS['maint.lead'];
+  const caseId = apiData(ops).cases.find((c) => c.vehicle === 'V-137' && c.kind === 'device').id;
+  assert.equal(handleAction(ops, { action: 'refer_safety', caseId })[0], 400, 'note is required');
+  assert.equal(handleAction(safety, { action: 'refer_safety', caseId, note: 'x' })[0], 403, 'only ops refers');
+  assert.equal(handleAction(ops, { action: 'refer_safety', caseId, note: 'Daytime unplugs — talk to D-37?' })[0], 200);
+  const ref = apiData(safety).referrals.find((r) => r.caseId === caseId);
+  assert.equal(ref.status, 'Open');
+  assert.equal(handleAction(safety, { action: 'referral_note', referralId: ref.id, note: 'Coaching D-37 at 7:00' })[0], 200);
+  assert.equal(handleAction(safety, { action: 'escalate', caseId, priority: 'P2', note: 'Check harness' })[0], 200);
+  const opsView = apiData(ops).cases.find((c) => c.id === caseId);
+  assert.equal(opsView.referral.status, 'Actioned');
+  assert.ok(opsView.referral.workOrder, 'ops sees the work order safety created');
+  assert.ok(apiData(maint).workOrders.some((w) => w.caseId === caseId && w.requestedBy === 'Safety Manager'));
+  assert.equal(handleAction(maint, { action: 'close_referral', referralId: ref.id })[0], 403);
+});
+
+test('safety advisory and firmware minimum create maintenance work orders', () => {
+  const safety = USERS['safety.manager'], maint = USERS['maint.lead'];
+  assert.equal(handleAction(safety, { action: 'advise_maintenance', vehicleId: 'V-142', note: 'Check brake sensor calibration', priority: 'P3' })[0], 200);
+  assert.equal(handleAction(USERS['ops.manager'], { action: 'set_min_firmware', version: '4.3.0' })[0], 403);
+  assert.equal(handleAction(safety, { action: 'set_min_firmware', version: '4.3.0' })[0], 200);
+  const fw = apiData(safety).firmware;
+  assert.equal(fw.belowMinimum.length, 36); // 24 on 4.1.8 + 12 on 4.2.1
+  assert.equal(fw.compliant, 24);
+  assert.equal(handleAction(safety, { action: 'request_firmware_update' })[0], 200);
+  const wos = apiData(maint).workOrders.filter((w) => w.firmwareTarget === '4.3.0');
+  assert.equal(wos.length, 3, 'one per depot');
+  assert.equal(wos.reduce((n, w) => n + w.vehicles.length, 0), 36);
+  assert.equal(apiData(safety).firmware.belowMinimum.every((v) => v.requested), true);
+  assert.equal(handleAction(safety, { action: 'request_firmware_update' })[0], 409, 'no duplicate requests');
+  assert.ok(!apiData(USERS['ops.manager']).firmware, 'firmware policy is a safety view');
+});

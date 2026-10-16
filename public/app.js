@@ -12,7 +12,7 @@ const ROLE_META = {
 };
 const TABS = {
   operations: [['tonight', 'Tonight'], ['backlog', 'Backlog'], ['other', 'Low & medium'], ['activity', 'Activity']],
-  safety: [['tonight', 'Tonight'], ['backlog', 'Backlog'], ['drivers', 'Drivers'], ['other', 'Low & medium'], ['activity', 'Activity']],
+  safety: [['tonight', 'Tonight'], ['referrals', 'From Ops'], ['firmware', 'Firmware'], ['drivers', 'Drivers'], ['backlog', 'Backlog'], ['other', 'Low & medium'], ['activity', 'Activity']],
   maintenance: [['queue', 'Queue'], ['done', 'Closed'], ['activity', 'Activity']],
 };
 
@@ -22,6 +22,7 @@ function store(k, v) {
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const et = (iso) => (iso ? new Date(iso).toLocaleString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '');
+const can = (action) => DATA.permissions.includes(action);
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const fmtEta = (s) => et(s.length === 16 ? s + ':00-04:00' : s);
 
@@ -37,7 +38,7 @@ async function act(payload) {
   const out = await r.json();
   if (!r.ok) return toast(out.error, true);
   DATA = out;
-  toast({ escalate: 'Sent to maintenance', resolve: 'Marked resolved', approve_wo: 'Work order approved', set_eta: 'ETA saved' }[payload.action] || 'Note added');
+  toast({ escalate: 'Sent to maintenance', resolve: 'Marked resolved', approve_wo: 'Work order approved', set_eta: 'ETA saved', refer_safety: 'Safety brought in', close_referral: 'Referral closed', referral_note: 'Update sent to Ops', advise_maintenance: 'Advisory sent to maintenance', set_min_firmware: 'Minimum firmware saved', request_firmware_update: 'Update requests sent' }[payload.action] || 'Note added');
   render();
 }
 
@@ -89,7 +90,9 @@ function tabCounts(role) {
     return { queue: DATA.workOrders.filter((w) => w.status !== 'Closed').length, done: DATA.workOrders.filter((w) => w.status === 'Closed').length };
   }
   const open = DATA.cases.filter((c) => c.state?.status !== 'resolved');
-  return { tonight: DATA.cases.filter((c) => c.tonight).length, backlog: open.filter((c) => !c.tonight).length, other: DATA.lowMedium.length };
+  return { tonight: DATA.cases.filter((c) => c.tonight).length, backlog: open.filter((c) => !c.tonight).length, other: DATA.lowMedium.length,
+    referrals: DATA.referrals ? DATA.referrals.filter((r) => r.status === 'Open').length : null,
+    firmware: DATA.firmware ? DATA.firmware.belowMinimum.length || null : null };
 }
 
 function heading(title, lede) { return `<h1 class="large">${title}</h1><p class="lede">${lede}</p>`; }
@@ -101,12 +104,14 @@ function view(role) {
   const tiles = `<section class="tiles">
     <div class="tile glass"><div class="k">Resolved here</div><div class="v">${m.resolved}<span class="s"> / ${m.highCriticalSent}</span></div><div class="s">high & critical cases</div></div>
     <div class="tile glass ${m.guardrailBreached ? 'warn' : 'good'}"><div class="k">Tonight actioned</div><div class="v">${m.tonightActioned}<span class="s"> / ${m.tonightQueue}</span></div><div class="s">${m.guardrailBreached ? 'More sent than worked' : 'All worked'}</div></div>
-    <div class="tile glass"><div class="k">Actions taken</div><div class="v">${m.workflowActions}</div><div class="s">${m.escalated} sent to maintenance</div></div>
+    <div class="tile glass"><div class="k">Actions taken</div><div class="v">${m.workflowActions}</div><div class="s">${m.escalated} to maintenance${DATA.user.role === 'operations' ? ' · ' + m.referred + ' to safety' : ''}</div></div>
   </section>`;
   const team = role === 'safety' ? 'driver-behaviour' : 'vehicle';
   if (TAB === 'tonight') return heading('Tonight', `Your ${DATA.rules.dailyCapacity} most important ${team} issues, ranked. Start at the top.`) + tiles + cards(DATA.cases.filter((c) => c.tonight));
   if (TAB === 'backlog') return heading('Backlog', 'Other high and critical issues, ranked. Pull from here once tonight is done.') + cards(DATA.cases.filter((c) => !c.tonight && c.state?.status !== 'resolved'));
   if (TAB === 'drivers') return drivers();
+  if (TAB === 'referrals') return referralsView();
+  if (TAB === 'firmware') return firmwareView();
   if (TAB === 'other') return lowMedium();
   return '';
 }
@@ -119,7 +124,8 @@ function cards(list) {
 
 function statusCapsule(c) {
   const st = c.state;
-  if (!st) return '';
+  if (!st && !c.referral) return '';
+  if (!st || (st.status === 'referred to safety' && c.referral)) return `<span class="capsule plain">Safety · ${esc(c.referral.status)}</span>`;
   if (st.status === 'resolved') return '<span class="capsule ok">Resolved</span>';
   if (c.linkedWo) return `<span class="capsule plain">${esc(c.linkedWo.id)} · ${esc(c.linkedWo.status)}${c.linkedWo.eta ? ' · ETA ' + esc(fmtEta(c.linkedWo.eta)) : ''}</span>`;
   return `<span class="capsule plain">${cap(st.status)}</span>`;
@@ -145,8 +151,9 @@ function card(c) {
       ${c.context?.length ? `<div><h4>Keep in mind</h4>${c.context.map((n) => `<div class="context">${esc(n)}</div>`).join('')}</div>` : ''}
       <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}${e.wo ? `<div class="m">${esc(e.wo)}</div>` : ''}</div>`).join('')}
         ${(c.history || []).length ? `<h4 style="margin-top:10px">Earlier faults the shop marked fixed</h4>${c.history.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}<div class="m">${esc(e.wo)}</div></div>`).join('')}` : ''}</div>
-      ${(st.notes || []).length || c.linkedWo ? `<div><h4>Updates</h4>
+      ${(st.notes || []).length || c.linkedWo || c.referral ? `<div><h4>Updates</h4>
         ${(st.notes || []).map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}
+        ${c.referral ? `<div class="note"><b>Safety · ${esc(c.referral.id)}</b> · ${esc(c.referral.status)}</div>${c.referral.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}${c.referral.workOrder ? `<div class="note"><b>Maintenance · ${esc(c.referral.workOrder.id)}</b> · ${esc(c.referral.workOrder.status)}${c.referral.workOrder.eta ? ' · ETA ' + esc(fmtEta(c.referral.workOrder.eta)) : ''}</div>` : ''}` : ''}
         ${c.linkedWo ? `<div class="note"><b>Maintenance · ${esc(c.linkedWo.id)}</b> · ${esc(c.linkedWo.status)}${c.linkedWo.eta ? ' · ETA ' + esc(fmtEta(c.linkedWo.eta)) : ' · no ETA yet'}</div>
           ${(c.linkedWo.notes || []).map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}` : ''}</div>` : ''}
       ${done ? '' : `<div class="form" data-case-form="${c.id}">
@@ -155,11 +162,85 @@ function card(c) {
         ${st.workOrder ? '' : `<div class="seg" role="group" aria-label="Priority for maintenance">${['P1', 'P2', 'P3'].map((p) => `<button type="button" data-prio="${p}" aria-pressed="${(p === 'P1' && c.priority === 'critical') || (p === 'P2' && c.priority !== 'critical')}">${{ P1: 'P1 · Today', P2: 'P2 · 48 h', P3: 'P3 · Next service' }[p]}</button>`).join('')}</div>`}
         <div class="btns">
           ${st.workOrder ? '' : '<button class="btn primary" data-do="escalate">Send to maintenance</button>'}
+          ${can('refer_safety') && !(c.referral && c.referral.status === 'Open') ? '<button class="btn purple" data-do="refer_safety">Bring in Safety</button>' : ''}
           <button class="btn" data-do="case_note">Add note</button>
           <button class="btn ok" data-do="resolve">Mark resolved</button>
-        </div></div>`}
+        </div>${can('refer_safety') ? '<p class="sub" style="margin:0">“Bring in Safety” sends this case and your note to the Safety team. A note is required.</p>' : ''}</div>`}
     </div>` : ''}
   </article>`;
+}
+
+// ---------- Safety: referrals & advisories ----------
+const prioSeg = (def = 'P2') => `<div class="seg" role="group" aria-label="Priority">${['P1', 'P2', 'P3'].map((p) => `<button type="button" data-prio="${p}" aria-pressed="${p === def}">${{ P1: 'P1 · Today', P2: 'P2 · 48 h', P3: 'P3 · Next service' }[p]}</button>`).join('')}</div>`;
+
+function referralsView() {
+  const list = DATA.referrals;
+  const advise = `<article class="card glass open" style="cursor:default"><div class="row"><span class="badge" style="--tone:var(--purple)">+</span><div class="grow"><div class="title">Advise maintenance</div><div class="sub">Flag a safety concern on any vehicle: a fault code, a repeat pattern, or a change you need. It goes into Maintenance's queue for approval.</div></div></div>
+    <div class="detail"><div class="form" data-advise>
+      <select class="field" aria-label="Vehicle"><option value="">Choose a vehicle…</option>${DATA.vehicles.map((v) => `<option value="${v.id}">${v.id} · ${esc(v.cls)} · ${esc(v.depot)} · ${v.driver}</option>`).join('')}</select>
+      <input class="field" type="text" placeholder="What should maintenance check or change?" aria-label="Advisory">
+      ${prioSeg()}
+      <div class="btns"><button class="btn primary" data-do="advise_maintenance">Send advisory</button></div>
+    </div></div></article>`;
+  const cards = list.length ? list.map(referralCard).join('') : '<div class="empty glass">No referrals from Operations yet.</div>';
+  return heading('From Operations', 'Cases Operations has brought you in on. Reply with a note, act on the driver, or send it to maintenance.') + `<div class="list">${cards}${advise}</div>`;
+}
+
+function referralCard(r) {
+  const c = r.case;
+  const open = OPEN.has(r.id);
+  const tone = r.status === 'Closed' ? 'ok' : c.priority;
+  return `<article class="card glass ${tone} ${open ? 'open' : ''}" data-card="${r.id}" tabindex="0" aria-expanded="${open}">
+    <div class="row"><span class="badge">${r.status === 'Closed' ? '✓' : '!'}</span>
+      <div class="grow"><div class="title">${esc(c.title)}</div>
+        <div class="sub">${esc(c.vehicle)} · ${esc(c.driver)} · ${esc(c.depot)} · from ${esc(r.from)}, ${esc(et(r.at))}</div>
+        <div class="capsules"><span class="capsule ${r.status === 'Open' ? 'high' : r.status === 'Closed' ? 'ok' : 'plain'}">${esc(r.status)}</span>${r.linkedWo ? `<span class="capsule plain">${esc(r.linkedWo.id)} · ${esc(r.linkedWo.status)}</span>` : ''}</div></div>
+      <span class="chev">›</span></div>
+    <div class="next"><b>Ops says:</b> ${esc(r.note)}</div>
+    ${open ? `<div class="detail">
+      <div><h4>Suggested steps</h4><ol>${c.actions.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></div>
+      ${c.context.length ? `<div><h4>Keep in mind</h4>${c.context.map((n) => `<div class="context">${esc(n)}</div>`).join('')}</div>` : ''}
+      <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}</div>`).join('')}</div>
+      ${r.notes.length ? `<div><h4>Your updates</h4>${r.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}</div>` : ''}
+      ${r.status === 'Closed' ? '' : `<div class="form" data-ref-form="${r.id}" data-case-id="${esc(r.caseId)}">
+        <h4>Respond</h4>
+        <input class="field" type="text" placeholder="e.g. Coaching ${esc(c.driver)} tomorrow; ride-along booked" aria-label="Note">
+        ${r.workOrder ? '' : prioSeg(c.priority === 'critical' ? 'P1' : 'P2')}
+        <div class="btns"><button class="btn primary" data-do="referral_note">Send update to Ops</button>${r.workOrder ? '' : '<button class="btn" data-do="escalate">Send to maintenance</button>'}<button class="btn ok" data-do="close_referral">Close</button></div>
+      </div>`}
+    </div>` : ''}
+  </article>`;
+}
+
+// ---------- Safety: firmware policy ----------
+function firmwareView() {
+  const f = DATA.firmware;
+  const min = f.policy.minFirmware;
+  const pending = f.belowMinimum.filter((v) => !v.requested);
+  const byDepot = {};
+  f.belowMinimum.forEach((v) => (byDepot[v.depot] ||= []).push(v));
+  return heading('Firmware', 'Set the oldest telematics firmware allowed on the road. Vehicles below it are listed and can be sent to maintenance for an update.') +
+    `<section class="tiles">
+      <div class="tile glass"><div class="k">Minimum version</div><div class="v">${min || '—'}</div><div class="s">${min ? 'set by ' + esc(f.policy.setBy) : 'not set yet'}</div></div>
+      <div class="tile glass ${min && f.belowMinimum.length ? 'warn' : min ? 'good' : ''}"><div class="k">Compliant</div><div class="v">${f.compliant}<span class="s"> / ${f.total}</span></div><div class="s">at or above the minimum</div></div>
+      <div class="tile glass"><div class="k">Update requests</div><div class="v">${f.belowMinimum.length - pending.length}</div><div class="s">of ${f.belowMinimum.length} below the minimum</div></div>
+    </section>
+    <div class="list">
+      <article class="card glass open" style="cursor:default"><div class="detail" style="padding-left:0;margin-top:0">
+        <div><h4>Minimum allowed version</h4>
+          <div class="seg" role="group" aria-label="Minimum firmware">${f.versions.slice().reverse().map((v) => `<button type="button" data-ver="${v.version}" aria-pressed="${v.version === (min || f.recommended)}">${v.version}${v.version === f.recommended ? ' · recommended' : ''}</button>`).join('')}</div></div>
+        <div class="btns"><button class="btn primary" data-fw="set_min_firmware">Save minimum</button></div>
+        <div><h4>What each version does</h4>${f.versions.map((v) => `<div class="ev"><span class="when">${v.version}</span> · ${v.vehicles} vehicles · ${v.brakingPer100km} harsh-braking alerts per 100 km<div class="m">${esc(v.note)}</div></div>`).join('')}</div>
+      </div></article>
+      ${min ? (f.belowMinimum.length ? `<article class="card glass high open" style="cursor:default"><div class="detail" style="padding-left:0;margin-top:0">
+        <div><h4>${f.belowMinimum.length} vehicles below ${min}</h4>${Object.entries(byDepot).map(([d, list]) => `<div class="ev"><span class="when">${esc(d)}</span> · ${list.length} vehicles<div class="m">${list.map((v) => `${v.vehicle} (${v.firmware})${v.requested ? ' ✓' : ''}`).join(' · ')}</div></div>`).join('')}</div>
+        ${pending.length ? `<div class="form" data-fw-req>
+          <input class="field" type="text" placeholder="Note for maintenance (optional)" aria-label="Note">
+          ${prioSeg('P2')}
+          <div class="btns"><button class="btn primary" data-fw="request_firmware_update">Request updates for ${pending.length} vehicles</button></div>
+          <p class="sub" style="margin:0">Creates one work order per depot in Maintenance's queue.</p></div>` : '<p class="sub">All of these already have an update request (✓).</p>'}
+      </div></article>` : '<div class="empty glass">Every vehicle meets the minimum.</div>') : ''}
+    </div>`;
 }
 
 // ---------- Maintenance ----------
@@ -190,7 +271,7 @@ function woCard(w) {
       <span class="chev">›</span>
     </div>
     ${open ? `<div class="detail">
-      ${w.request ? `<div><h4>What Ops / Safety reported</h4><ol>${w.request.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ol>
+      ${w.request ? `<div><h4>${esc(w.request.title === 'Safety advisory' || w.request.title === 'Firmware policy' ? w.request.title + ' from ' + w.requestedBy : 'What ' + (w.requestedBy || 'Ops / Safety') + ' reported')}</h4>${(w.request.context || []).map((n) => `<div class="context">${esc(n)}</div>`).join('')}<ol>${w.request.actions.map((a) => `<li>${esc(a)}</li>`).join('')}</ol>
         ${w.request.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}</div>`).join('')}
         ${(w.request.history || []).map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}<div class="m">${esc(e.wo)}</div></div>`).join('')}
         ${w.request.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(n.text)}</div>`).join('')}</div>` : ''}
@@ -236,7 +317,7 @@ function drivers() {
 function activity() {
   const lede = DATA.user.role === 'maintenance' ? 'Updates on your work orders.' : 'Every escalation, note and resolution on your team’s cases. These count toward your metrics.';
   if (!DATA.log.length) return heading('Activity', lede) + '<div class="empty glass">No actions yet.</div>';
-  const label = { escalate: 'Sent to maintenance', resolve: 'Resolved', case_note: 'Note', approve_wo: 'Approved', set_eta: 'ETA set', wo_note: 'Note' };
+  const label = { escalate: 'Sent to maintenance', resolve: 'Resolved', case_note: 'Note', approve_wo: 'Approved', set_eta: 'ETA set', wo_note: 'Note', refer_safety: 'Safety brought in', referral_note: 'Safety update', close_referral: 'Referral closed', advise_maintenance: 'Safety advisory', set_min_firmware: 'Firmware minimum set', request_firmware_update: 'Firmware updates requested' };
   return heading('Activity', lede) + `<div class="rows glass">${DATA.log.map((l) => `<div class="r"><div class="grow"><div class="title" style="font-size:.92rem">${label[l.action] || l.action} · ${esc(l.target)}</div><div class="sub">${esc(l.user)} · ${esc(et(l.at))}${l.detail ? ' · ' + esc(l.detail) : ''}</div></div></div>`).join('')}</div>`;
 }
 
@@ -261,6 +342,23 @@ function wire() {
     const f = b.closest('[data-case-form]');
     const prio = f.querySelector('[data-prio][aria-pressed="true"]');
     act({ action: b.dataset.do, caseId: f.dataset.caseForm, note: f.querySelector('input').value.trim(), priority: prio?.dataset.prio });
+  }));
+  document.querySelectorAll('[data-ref-form] [data-do]').forEach((b) => b.addEventListener('click', () => {
+    const f = b.closest('[data-ref-form]');
+    const prio = f.querySelector('[data-prio][aria-pressed="true"]');
+    const note = f.querySelector('input').value.trim();
+    if (b.dataset.do === 'escalate') act({ action: 'escalate', caseId: f.dataset.caseId, note, priority: prio?.dataset.prio });
+    else act({ action: b.dataset.do, referralId: f.dataset.refForm, note });
+  }));
+  document.querySelectorAll('[data-advise] [data-do]').forEach((b) => b.addEventListener('click', () => {
+    const f = b.closest('[data-advise]');
+    act({ action: 'advise_maintenance', vehicleId: f.querySelector('select').value, note: f.querySelector('input').value.trim(), priority: f.querySelector('[data-prio][aria-pressed="true"]')?.dataset.prio });
+  }));
+  document.querySelectorAll('[data-ver]').forEach((b) => b.addEventListener('click', () => b.parentElement.querySelectorAll('[data-ver]').forEach((x) => x.setAttribute('aria-pressed', x === b))));
+  document.querySelectorAll('[data-fw]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.fw === 'set_min_firmware') return act({ action: 'set_min_firmware', version: $('[data-ver][aria-pressed="true"]').dataset.ver });
+    const f = b.closest('[data-fw-req]');
+    act({ action: 'request_firmware_update', note: f.querySelector('input').value.trim(), priority: f.querySelector('[data-prio][aria-pressed="true"]')?.dataset.prio });
   }));
   document.querySelectorAll('[data-wo-form] [data-do]').forEach((b) => b.addEventListener('click', () => {
     const f = b.closest('[data-wo-form]');

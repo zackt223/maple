@@ -343,6 +343,7 @@ function run() {
       .sort((a, b) => b.event_time_utc.localeCompare(a.event_time_utc))
       .map((a) => ({ id: a.alert_id, type: a.alert_type, priority: a.priority, vehicle: a.vehicle_id, driver: a.driver_id, depot: a.depot, when: a.local, reason: a.reason, vendor: a.vendor_severity })),
     workOrders: ctx.workOrders.map(({ openedUtc, closedUtc, codes, isDevice, isService, ...w }) => w),
+    vehicles: ctx.vehicles,
     drivers: driverStats(alerts, ctx),
     quality: dataQuality(ctx.raw, dupes, alerts, ctx),
     _alerts: alerts,

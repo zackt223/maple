@@ -9,7 +9,7 @@ git clone https://github.com/zackt223/maple.git
 cd maple
 npm start          # dashboard → http://localhost:3000
 npm run report     # tonight's ranked list in the terminal (no browser needed)
-npm test           # 14 checks: rules, data counts, permissions, role visibility
+npm test           # 16 checks: rules, data counts, permissions, role visibility, referrals, firmware policy
 ```
 
 Open http://localhost:3000 and choose a team: **Operations Manager**, **Safety Manager** or **Maintenance Lead**. Each team only sees its own view. To reset the workflow (escalations, approvals, notes), delete `state.json` and restart.
@@ -64,9 +64,16 @@ A local triage dashboard for the **Operations Manager** to use tonight and befor
 
 | Team | Sees | Can do |
 | --- | --- | --- |
-| **Operations** | **Tonight:** top 10 vehicle issues (engine faults, overdue service, unplugged devices) · **Backlog** · **Low & medium** (idling, camera) · **Activity** | Send an issue to Maintenance with a priority (P1 today / P2 48 h / P3 next service), add notes, mark resolved. Maintenance's status, ETA and notes show on the case. |
-| **Safety** | **Tonight:** top 10 driver issues (speeding over 115 km/h, braking ≥ 0.6 g) · **Backlog** · **Drivers** (risk per 100 km) · **Low & medium** · **Activity** | Same as Operations |
+| **Operations** | **Tonight:** top 10 vehicle issues (engine faults, overdue service, unplugged devices) · **Backlog** · **Low & medium** (idling, camera) · **Activity** | Send an issue to Maintenance with a priority (P1 today / P2 48 h / P3 next service). **Bring in Safety** on any case, with a required note (e.g. daytime unplugs → talk to the driver). Add notes, mark resolved. Safety's replies and Maintenance's status, ETA and notes show on the case. |
+| **Safety** | **Tonight:** top 10 driver issues (speeding over 115 km/h, braking ≥ 0.6 g) · **From Ops:** cases Operations referred, with their note and the evidence · **Firmware** policy · **Drivers** (risk per 100 km) · **Backlog** · **Low & medium** · **Activity** | Act on drivers and reply to Ops on referrals, send a referred case to Maintenance, or close it. **Advise maintenance** on any vehicle (a safety code, repeat pattern or change needed). Set the **minimum telematics firmware version** and send update requests for every vehicle below it (one work order per depot). |
 | **Maintenance** | **Queue:** work orders sent by Ops and Safety, plus the shop's open ones, each with the evidence and repair history · **Closed** · **Activity** | Only approve work orders, set an estimated completion time, and add notes for Ops and Safety |
+
+**Firmware minimum:** the vendor notes and the data give Safety what it needs to choose a version:
+- **4.3.0** is the current release (24 vehicles, 0.28 harsh-braking alerts per 100 km).
+- **4.2.1** logs about 5× more light braking (12 vehicles, 1.45 per 100 km), which skews driver scores.
+- **4.1.8** is legacy (24 vehicles).
+
+The dashboard recommends 4.3.0. Setting it as the minimum flags 36 vehicles, and one click sends Maintenance one update work order per depot. Requests aren't duplicated.
 
 **How alerts are sorted:**
 - **Critical:** engine faults rated critical in the reference (P0217, P0524), and any fault that comes back after a repair.
@@ -84,6 +91,7 @@ High and critical alerts are grouped into **cases**, one per vehicle problem or 
 - **Primary:** high/critical cases resolved through the dashboard, out of all high/critical cases sent.
 - **Guardrail:** cases sent vs. cases actioned. "Tonight actioned" turns **red** whenever more high/critical cases were sent than the team has acted on, so the tool can't look good by sending more alerts.
 - **Maintenance sees:** work orders waiting for approval, approved work orders, and how many have an ETA.
+- **Safety's Firmware view:** vehicles compliant with the minimum version, and how many have update requests.
 
 The design follows iOS 26 Liquid Glass:
 - translucent layers over a soft colour background
@@ -137,9 +145,13 @@ The design follows iOS 26 Liquid Glass:
   - D-17 ranks #1 on raw counts but not on the per-100-km measure
   - tonight's list holds 10
   - **permissions:** Maintenance can't escalate or resolve, Ops can't approve, and Safety can't act on an Ops case
-  - **visibility:** Ops and Safety receive no work-order board, Maintenance receives no cases, and driver data is Safety-only
+  - **visibility:** Ops and Safety receive no work-order board, Maintenance receives no cases, and driver and firmware data are Safety-only
+  - **referrals:** Ops must include a note; Safety can reply and send the case to Maintenance; Ops sees Safety's reply and the work order
+  - **firmware:** a 4.3.0 minimum flags exactly 36 vehicles (24 on 4.1.8 + 12 on 4.2.1), creates one work order per depot, and won't create duplicates
 - **Recomputed key numbers** with separate exploration scripts in `scratch/` before building: duplicates, delays by depot, braking per 100 km by firmware, unplug times in local time.
-- **Clicked through in the browser:** signed in as Ops and sent V-137 to Maintenance; signed in as Maintenance and saw only the work-order queue, with V-137's evidence and repair history.
+- **Clicked through in the browser:**
+  - signed in as Ops and sent V-137 to Maintenance; signed in as Maintenance and saw only the work-order queue, with V-137's evidence and repair history
+  - as Ops, brought in Safety on V-137's daytime unplugs; as Safety, saw the referral with Ops' note and set the firmware minimum to 4.3.0
 - **Caught a wrong number in the README** by rerunning the code: the P0420 count was first written as 42, and the real figure is 29.
 
 ## AI use

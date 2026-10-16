@@ -3,7 +3,7 @@
   --text: #1c1c1e; --muted: rgba(60,60,67,.62); --hair: rgba(60,60,67,.14);
   --glass: rgba(255,255,255,.55); --glass-strong: rgba(255,255,255,.72); --glass-edge: rgba(255,255,255,.85);
   --fill: rgba(120,120,128,.12);
-  --critical: #ff3b30; --high: #ff9500; --medium: #ffcc00; --low: #8e8e93; --ok: #34c759; --blue: #007aff;
+  --critical: #ff3b30; --high: #ff9500; --medium: #ffcc00; --low: #8e8e93; --ok: #34c759; --blue: #007aff; --purple: #af52de;
   --radius: 26px; --radius-sm: 16px;
   --shadow: 0 10px 30px rgba(31,38,64,.10), 0 1px 2px rgba(31,38,64,.06);
   --bg: #eef1f7;
@@ -13,7 +13,7 @@
     --text: #f5f5f7; --muted: rgba(235,235,245,.6); --hair: rgba(255,255,255,.12);
     --glass: rgba(44,44,48,.55); --glass-strong: rgba(44,44,48,.75); --glass-edge: rgba(255,255,255,.16);
     --fill: rgba(118,118,128,.24);
-    --critical: #ff453a; --high: #ff9f0a; --medium: #ffd60a; --low: #98989d; --ok: #30d158; --blue: #0a84ff;
+    --critical: #ff453a; --high: #ff9f0a; --medium: #ffd60a; --low: #98989d; --ok: #30d158; --blue: #0a84ff; --purple: #bf5af2;
     --shadow: 0 10px 30px rgba(0,0,0,.45); --bg: #0b0b10;
   }
 }
@@ -100,6 +100,7 @@ button { font: inherit; color: inherit; }
 .btn:disabled { opacity: .4; cursor: default; transform: none; }
 .btn.primary { background: var(--blue); color: #fff; }
 .btn.ok { background: var(--ok); color: #fff; }
+.btn.purple { background: var(--purple); color: #fff; }
 .btn:focus-visible, .tab:focus-visible, .card:focus-visible, .role:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .seg { display: inline-flex; background: var(--fill); border-radius: 999px; padding: 3px; gap: 2px; }
 .seg button { border: 0; background: transparent; border-radius: 999px; padding: 7px 14px; font-weight: 600; font-size: .82rem; cursor: pointer; }
