@@ -9,10 +9,10 @@ git clone https://github.com/zackt223/maple.git
 cd maple
 npm start          # dashboard → http://localhost:3000
 npm run report     # tonight's ranked list in the terminal (no browser needed)
-npm test           # 16 checks: rules, data counts, permissions, role visibility, referrals, firmware policy
+npm test           # 18 checks: rules, data counts, permissions, role visibility, referrals, firmware, backfill, admin
 ```
 
-Open http://localhost:3000 and choose a team: **Operations Manager**, **Safety Manager** or **Maintenance Lead**. Each team only sees its own view. To reset the workflow (escalations, approvals, notes), delete `state.json` and restart.
+Open http://localhost:3000 and choose a team: **Operations Manager**, **Safety Manager**, **Maintenance Lead** or **Business Manager** (read-only view of everything). Each team only sees its own view. Use the depot buttons at the top (All / North Yard / Airport Hub / Hamilton Depot) to work one location at a time. To reset the workflow (escalations, approvals, notes), delete `state.json` and restart.
 
 Sample `npm run report` output (abridged):
 
@@ -32,14 +32,20 @@ Hamilton Depot: 114/587 alerts arrived >1 h late (max 30 h)
 
 ## Tonight's top 3 for Maple Freight
 
-1. **Item:** Ground **V-137** before the 6:00 a.m. dispatch.
+1. **Item:** Ground **V-108 (Hamilton)** and **V-137 (North Yard)** before the 6:00 a.m. dispatch. *(Updated after the new information: V-108 was hidden by Hamilton's gateway outage.)*
+   **V-108 evidence (from `hamilton_backfill.csv`):**
+   - P0217 over-temperature at **107 °C at 12:05 p.m. ET**, then P0524 oil pressure low at **88 kPa at 3:41 p.m. ET**.
+   - That is the same overheat-then-oil-pressure failure pattern as V-137. Both were marked MEDIUM by the vendor.
+   - Neither alert reached Maple Freight until the gateway reconnected at **6:47 p.m.**, so nobody has seen them.
+   - V-108 is a Class 5 service truck; its previous work order was WO-5512 (P0171).
+   **V-137:**
    **Why it matters:** The shop cleared it as "bad sensor, OK to dispatch" this morning. Seven hours later it threw **P0524, engine oil pressure too low**, which the fault-code reference rates *"Critical – stop vehicle immediately"*. Driving on low oil pressure can destroy the engine on the road.
    **Evidence from the data:**
    - P0217 over-temperature fired four days running, and the reading **climbed every day: 104 → 109 → 113 → 118 °C** (Sep 17–20). A steadily rising temperature points to a real overheating problem, not a faulty sensor.
    - WO-5540 replaced the coolant sensor and closed at 07:40 ET on Sep 21.
    - P0524 then fired at **96 kPa at 14:32 ET** the same day.
    - The vendor marked **every one** of these alerts MEDIUM, so the "vendor HIGH only" filter hid them.
-   **Next action (who, by when):** The Maintenance Lead tags out V-137 tonight and inspects the cooling and oil systems; clearing codes isn't enough. The Operations Manager assigns a spare vehicle to D-37's route before 6:00 a.m.
+   **Next action (who, by when):** The Maintenance Lead tags out **V-108 and V-137** tonight and inspects the cooling and oil systems; clearing codes isn't enough. The Operations Manager assigns spares for D-08 and D-37 before 6:00 a.m.
 
 2. **Item:** Five **misfires (P0300) with no work order**: V-151, V-113, V-126, V-131 and V-111. The worst is **V-151**: it's misfiring *and* 2,350 km overdue for service.
    **Why it matters:** The reference says P0300 needs inspection *within 24 h*. These vehicles have been running for 2 to 12 days, and V-151's service isn't booked until **Oct 5**.
@@ -47,6 +53,7 @@ Hamilton Depot: 114/587 alerts arrived >1 h late (max 30 h)
    - 8 vehicles logged P0300. 3 were handled: WO-5527, WO-5534, and WO-5543 for V-158, which is booked for tomorrow morning.
    - **5 have no work order, and 4 of those 5 are at Hamilton Depot.** Hamilton's alerts arrive late: 114 of 587 came in more than 1 h after the event, up to 30 h. The V-113 and V-131 misfires reached the platform 25–30 h after they happened, even though the vendor reports "normal connectivity".
    - V-151 shows `maintenance_due` +2,350 km and a P0300 on Sep 20 at 15:09 ET.
+   - The Hamilton outage is now confirmed: the gateway held 10 alerts for up to 6.7 h before reconnecting at 6:47 p.m. ET.
    **Next action (who, by when):** Operations sends these to Maintenance from the dashboard tonight. V-151 is P1 (held from dispatch, service pulled forward). The other four are P2 (inspect by Tue Sep 22). Ops also makes sure V-158 is held at 6:00 a.m. IT opens a ticket with TrackLine about Hamilton's delays.
 
 3. **Item:** **D-17 is not the worst driver.** Coach **D-49 and D-30** first.
@@ -58,6 +65,21 @@ Hamilton Depot: 114/587 alerts arrived >1 h late (max 30 h)
    - **D-49 (#3) and D-30 (#5)** each had 8 serious events, with braking up to 0.73–0.74 g, on the *less* sensitive firmware.
    **Next action (who, by when):** The Safety Manager reviews camera footage and coaches D-49 and D-30 this week, and uses the dashboard's Drivers view for the weekly list instead of raw counts. IT asks TrackLine to re-tune the 4.2.1 braking threshold.
 
+## What changed after the new information
+
+Hamilton's gateway reconnected at **6:47 p.m. ET** and delivered 10 held alerts (`hamilton_backfill.csv`). What changed:
+
+- **Tonight's #1 changed.** The backfill held **V-108**'s P0217 overheat (107 °C) and P0524 low oil pressure (88 kPa), both critical, both marked MEDIUM by the vendor. V-108 is now the top case and is added to top-3 item #1, next to V-137.
+- **New extreme speeding.** V-131 at 131 km/h and V-126 at **104 km/h in a 60 zone**. I added a rule: 40 km/h or more over a known posted limit counts as high, even when the speed is 115 km/h or below.
+- **The outage is now a case of its own.** I added **network/communication failure cases per depot**. Any alert received more than 1 h after it happened is treated as held by a communication failure.
+  - Hamilton gets a **critical** "gateway outage: 10 alerts held" case, listing the held alerts.
+  - North Yard has 3 delayed alerts. Airport Hub had none.
+  - Every case or alert that arrived late carries an **"Arrived after network restored"** or **"Arrived late"** tag, so teams know the timing is off.
+- **Depot filter.** Every view (cases, low/medium, work orders, referrals, drivers, firmware) can be narrowed to North Yard, Airport Hub or Hamilton Depot. Cases show vehicle, class, driver and depot, and each depot gets its own ranked top 10.
+- **Business Manager role.** Read-only oversight of every team's dashboard and metrics, with a per-depot overview.
+- **"Now" moved** from 6:00 p.m. to 6:47 p.m. ET, when the backfill arrived.
+- **What did *not* change:** the V-137 finding, the unworked misfires and the D-17 analysis all still hold. The backfill makes the Hamilton point stronger.
+
 ## What I built, and for whom
 
 A local triage dashboard for the **Operations Manager** to use tonight and before the 6:00 a.m. dispatch, with separate views for the **Safety Manager** and the **Maintenance Lead**. You choose your team at sign-in, and the server only sends that team's data, so nobody sees another team's queue.
@@ -66,6 +88,7 @@ A local triage dashboard for the **Operations Manager** to use tonight and befor
 | --- | --- | --- |
 | **Operations** | **Tonight:** top 10 vehicle issues (engine faults, overdue service, unplugged devices) · **Backlog** · **Low & medium** (idling, camera) · **Activity** | Send an issue to Maintenance with a priority (P1 today / P2 48 h / P3 next service). **Bring in Safety** on any case, with a required note (e.g. daytime unplugs → talk to the driver). Add notes, mark resolved. Safety's replies and Maintenance's status, ETA and notes show on the case. |
 | **Safety** | **Tonight:** top 10 driver issues (speeding over 115 km/h, braking ≥ 0.6 g) · **From Ops:** cases Operations referred, with their note and the evidence · **Firmware** policy · **Drivers** (risk per 100 km) · **Backlog** · **Low & medium** · **Activity** | Act on drivers and reply to Ops on referrals, send a referred case to Maintenance, or close it. **Advise maintenance** on any vehicle (a safety code, repeat pattern or change needed). Set the **minimum telematics firmware version** and send update requests for every vehicle below it (one work order per depot). |
+| **Business Manager** | **Overview** (every team's metrics, cases per depot, network-affected counts, most urgent cases across teams) · read-only **Operations**, **Safety** and **Maintenance** views · **Activity** | Oversee only (no edits) |
 | **Maintenance** | **Queue:** work orders sent by Ops and Safety, plus the shop's open ones, each with the evidence and repair history · **Closed** · **Activity** | Only approve work orders, set an estimated completion time, and add notes for Ops and Safety |
 
 **Firmware minimum:** the vendor notes and the data give Safety what it needs to choose a version:
@@ -93,9 +116,10 @@ High and critical alerts are grouped into **cases**, one per vehicle problem or 
 - **Maintenance sees:** work orders waiting for approval, approved work orders, and how many have an ETA.
 - **Safety's Firmware view:** vehicles compliant with the minimum version, and how many have update requests.
 
-The design follows iOS 26 Liquid Glass:
-- translucent layers over a soft colour background
-- a floating tab bar
+The design follows iOS 26 Liquid Glass, styled to the dark smoked-glass reference with a lime accent:
+- translucent glass panels over a dark background
+- a glass sidebar on desktop and a floating tab bar on mobile
+- a depot switcher at the top
 - large titles
 - cards that tap to expand
 - light and dark mode

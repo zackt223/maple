@@ -2,6 +2,9 @@
 let DATA = null;
 let USER = store('user');
 let TAB = store('tab');
+let DEPOT = store('depot') || 'all';
+const DEPOTS = ['North Yard', 'Airport Hub', 'Hamilton Depot'];
+const inDepot = (d) => DEPOT === 'all' || !d || d === DEPOT;
 const OPEN = new Set();
 let filter = { priority: 'all', type: 'all', depot: 'all', limit: 60 };
 
@@ -9,11 +12,13 @@ const ROLE_META = {
   operations: { color: '#007aff', short: 'Ops', blurb: 'Vehicle availability for the 6:00 a.m. dispatch' },
   safety: { color: '#af52de', short: 'Safety', blurb: 'Driver behaviour and coaching' },
   maintenance: { color: '#ff9500', short: 'Maintenance', blurb: 'Work orders escalated to the shop' },
+  admin: { color: '#d7f23c', short: 'Business', blurb: 'Oversee every team, depot and metric' },
 };
 const TABS = {
   operations: [['tonight', 'Tonight'], ['backlog', 'Backlog'], ['other', 'Low & medium'], ['activity', 'Activity']],
   safety: [['tonight', 'Tonight'], ['referrals', 'From Ops'], ['firmware', 'Firmware'], ['drivers', 'Drivers'], ['backlog', 'Backlog'], ['other', 'Low & medium'], ['activity', 'Activity']],
   maintenance: [['queue', 'Queue'], ['done', 'Closed'], ['activity', 'Activity']],
+  admin: [['overview', 'Overview'], ['ops', 'Operations'], ['safety', 'Safety'], ['maint', 'Maintenance'], ['activity', 'Activity']],
 };
 
 function store(k, v) {
@@ -77,38 +82,57 @@ function render() {
   const counts = tabCounts(role);
   $('#app').innerHTML = `
     <header class="top"><div class="top-inner">
+      <div class="seg depots" role="group" aria-label="Depot">${[['all', 'All depots'], ...DEPOTS.map((d) => [d, d])].map(([id, l]) => `<button type="button" data-depot="${id}" aria-pressed="${DEPOT === id}">${l}</button>`).join('')}</div>
       <span class="eyebrow">${esc(DATA.generatedFor)}</span>
       <button class="avatar glass" id="signout" style="--role:${ROLE_META[role].color}" aria-label="Sign out"><span class="dot"></span>${esc(DATA.user.name)} · Sign out</button>
     </div></header>
     <main class="wrap">${view(role)}</main>
-    <nav class="tabbar glass" role="tablist">${tabs.map(([id, label]) => `<button class="tab" role="tab" aria-selected="${id === TAB}" data-tab="${id}">${label}${counts[id] != null ? `<span class="n">${counts[id]}</span>` : ''}</button>`).join('')}</nav>`;
+    <nav class="tabbar glass" role="tablist"><div class="brand"><span class="logo-sm">M</span>Maple Freight</div>${tabs.map(([id, label]) => `<button class="tab" role="tab" aria-selected="${id === TAB}" data-tab="${id}"><span class="ti">${label[0]}</span><span class="tl">${label}</span>${counts[id] != null ? `<span class="n">${counts[id]}</span>` : ''}</button>`).join('')}</nav>`;
   wire();
 }
 
 function tabCounts(role) {
+  if (role === 'admin') return {};
   if (role === 'maintenance') {
-    return { queue: DATA.workOrders.filter((w) => w.status !== 'Closed').length, done: DATA.workOrders.filter((w) => w.status === 'Closed').length };
+    const wos = DATA.workOrders.filter((w) => inDepot(w.depot));
+    return { queue: wos.filter((w) => w.status !== 'Closed').length, done: wos.filter((w) => w.status === 'Closed').length };
   }
-  const open = DATA.cases.filter((c) => c.state?.status !== 'resolved');
-  return { tonight: DATA.cases.filter((c) => c.tonight).length, backlog: open.filter((c) => !c.tonight).length, other: DATA.lowMedium.length,
+  const cs = depotCases();
+  const open = cs.filter((c) => c.state?.status !== 'resolved');
+  return { tonight: cs.filter((c) => c.tonight).length, backlog: open.filter((c) => !c.tonight).length, other: DATA.lowMedium.filter((x) => inDepot(x.depot)).length,
     referrals: DATA.referrals ? DATA.referrals.filter((r) => r.status === 'Open').length : null,
     firmware: DATA.firmware ? DATA.firmware.belowMinimum.length || null : null };
 }
 
 function heading(title, lede) { return `<h1 class="large">${title}</h1><p class="lede">${lede}</p>`; }
 
+// Cases for the selected depot, re-ranked so each depot gets its own top ${DATA.rules.dailyCapacity}.
+function depotCases() {
+  return DATA.cases.filter((c) => inDepot(c.depot)).map((c, i) => ({ ...c, rank: i + 1, tonight: i < DATA.rules.dailyCapacity }));
+}
+function caseMetrics(cases) {
+  const tonight = cases.filter((c) => c.tonight);
+  const tonightActioned = tonight.filter((c) => c.state || c.referral).length;
+  return { highCriticalSent: cases.length, resolved: cases.filter((c) => c.state?.status === 'resolved').length, tonightQueue: tonight.length, tonightActioned,
+    guardrailBreached: tonightActioned < tonight.length, escalated: cases.filter((c) => c.state?.workOrder).length, referred: cases.filter((c) => c.referral).length, workflowActions: DATA.metrics.workflowActions };
+}
+const where = () => (DEPOT === 'all' ? 'across all depots' : 'at ' + DEPOT);
+
 function view(role) {
   if (TAB === 'activity') return activity();
+  if (role === 'admin') return adminView();
   if (role === 'maintenance') return maintenance();
-  const m = DATA.metrics;
+  const cs = depotCases();
+  const m = caseMetrics(cs);
   const tiles = `<section class="tiles">
     <div class="tile glass"><div class="k">Resolved here</div><div class="v">${m.resolved}<span class="s"> / ${m.highCriticalSent}</span></div><div class="s">high & critical cases</div></div>
     <div class="tile glass ${m.guardrailBreached ? 'warn' : 'good'}"><div class="k">Tonight actioned</div><div class="v">${m.tonightActioned}<span class="s"> / ${m.tonightQueue}</span></div><div class="s">${m.guardrailBreached ? 'More sent than worked' : 'All worked'}</div></div>
     <div class="tile glass"><div class="k">Actions taken</div><div class="v">${m.workflowActions}</div><div class="s">${m.escalated} to maintenance${DATA.user.role === 'operations' ? ' · ' + m.referred + ' to safety' : ''}</div></div>
+    <div class="tile glass"><div class="k">Network</div><div class="v">${cs.filter((c) => c.network).length}</div><div class="s">communication failures ${where()}</div></div>
   </section>`;
   const team = role === 'safety' ? 'driver-behaviour' : 'vehicle';
-  if (TAB === 'tonight') return heading('Tonight', `Your ${DATA.rules.dailyCapacity} most important ${team} issues, ranked. Start at the top.`) + tiles + cards(DATA.cases.filter((c) => c.tonight));
-  if (TAB === 'backlog') return heading('Backlog', 'Other high and critical issues, ranked. Pull from here once tonight is done.') + cards(DATA.cases.filter((c) => !c.tonight && c.state?.status !== 'resolved'));
+  if (TAB === 'tonight') return heading('Tonight', `Your ${DATA.rules.dailyCapacity} most important ${team} issues ${where()}, ranked. Start at the top.`) + tiles + cards(cs.filter((c) => c.tonight));
+  if (TAB === 'backlog') return heading('Backlog', `Other high and critical issues ${where()}, ranked. Pull from here once tonight is done.`) + cards(cs.filter((c) => !c.tonight && c.state?.status !== 'resolved'));
   if (TAB === 'drivers') return drivers();
   if (TAB === 'referrals') return referralsView();
   if (TAB === 'firmware') return firmwareView();
@@ -140,8 +164,8 @@ function card(c) {
       <span class="badge">${c.rank}</span>
       <div class="grow">
         <div class="title">${esc(c.title)}</div>
-        <div class="sub">${esc(c.vehicle)} · ${esc(c.driver)} · ${esc(c.depot)} · ${c.hoursAgo < 48 ? c.hoursAgo + ' h ago' : Math.round(c.hoursAgo / 24) + ' days ago'}</div>
-        <div class="capsules"><span class="capsule">${cap(c.priority)}</span>${c.recurred ? '<span class="capsule critical">After repair</span>' : ''}${statusCapsule(c)}</div>
+        <div class="sub">${esc(c.vehicle)}${c.vehicleClass ? ' · ' + esc(c.vehicleClass) : ''} · Driver ${esc(c.driver)} · <b>${esc(c.depot)}</b> · ${c.hoursAgo < 48 ? c.hoursAgo + ' h ago' : Math.round(c.hoursAgo / 24) + ' days ago'}</div>
+        <div class="capsules"><span class="capsule">${cap(c.priority)}</span>${c.network ? '<span class="capsule net">Network failure</span>' : ''}${c.backfill ? '<span class="capsule net">Arrived after network restored</span>' : c.lateArrivals ? '<span class="capsule net">Arrived late</span>' : ''}${c.recurred ? '<span class="capsule critical">After repair</span>' : ''}${statusCapsule(c)}</div>
       </div>
       <span class="chev">›</span>
     </div>
@@ -156,7 +180,7 @@ function card(c) {
         ${c.referral ? `<div class="note"><b>Safety · ${esc(c.referral.id)}</b> · ${esc(c.referral.status)}</div>${c.referral.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}${c.referral.workOrder ? `<div class="note"><b>Maintenance · ${esc(c.referral.workOrder.id)}</b> · ${esc(c.referral.workOrder.status)}${c.referral.workOrder.eta ? ' · ETA ' + esc(fmtEta(c.referral.workOrder.eta)) : ''}</div>` : ''}` : ''}
         ${c.linkedWo ? `<div class="note"><b>Maintenance · ${esc(c.linkedWo.id)}</b> · ${esc(c.linkedWo.status)}${c.linkedWo.eta ? ' · ETA ' + esc(fmtEta(c.linkedWo.eta)) : ' · no ETA yet'}</div>
           ${(c.linkedWo.notes || []).map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}` : ''}</div>` : ''}
-      ${done ? '' : `<div class="form" data-case-form="${c.id}">
+      ${done || !can('case_note') ? '' : `<div class="form" data-case-form="${c.id}">
         <h4>Take action</h4>
         <input class="field" type="text" placeholder="Add a note (optional)" aria-label="Note">
         ${st.workOrder ? '' : `<div class="seg" role="group" aria-label="Priority for maintenance">${['P1', 'P2', 'P3'].map((p) => `<button type="button" data-prio="${p}" aria-pressed="${(p === 'P1' && c.priority === 'critical') || (p === 'P2' && c.priority !== 'critical')}">${{ P1: 'P1 · Today', P2: 'P2 · 48 h', P3: 'P3 · Next service' }[p]}</button>`).join('')}</div>`}
@@ -174,7 +198,7 @@ function card(c) {
 const prioSeg = (def = 'P2') => `<div class="seg" role="group" aria-label="Priority">${['P1', 'P2', 'P3'].map((p) => `<button type="button" data-prio="${p}" aria-pressed="${p === def}">${{ P1: 'P1 · Today', P2: 'P2 · 48 h', P3: 'P3 · Next service' }[p]}</button>`).join('')}</div>`;
 
 function referralsView() {
-  const list = DATA.referrals;
+  const list = DATA.referrals.filter((r) => inDepot(r.case.depot));
   const advise = `<article class="card glass open" style="cursor:default"><div class="row"><span class="badge" style="--tone:var(--purple)">+</span><div class="grow"><div class="title">Advise maintenance</div><div class="sub">Flag a safety concern on any vehicle: a fault code, a repeat pattern, or a change you need. It goes into Maintenance's queue for approval.</div></div></div>
     <div class="detail"><div class="form" data-advise>
       <select class="field" aria-label="Vehicle"><option value="">Choose a vehicle…</option>${DATA.vehicles.map((v) => `<option value="${v.id}">${v.id} · ${esc(v.cls)} · ${esc(v.depot)} · ${v.driver}</option>`).join('')}</select>
@@ -202,7 +226,7 @@ function referralCard(r) {
       ${c.context.length ? `<div><h4>Keep in mind</h4>${c.context.map((n) => `<div class="context">${esc(n)}</div>`).join('')}</div>` : ''}
       <div><h4>Evidence</h4>${c.evidence.map((e) => `<div class="ev"><span class="when">${esc(e.when)} ET</span> · ${esc(e.reason)}</div>`).join('')}</div>
       ${r.notes.length ? `<div><h4>Your updates</h4>${r.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}</div>` : ''}
-      ${r.status === 'Closed' ? '' : `<div class="form" data-ref-form="${r.id}" data-case-id="${esc(r.caseId)}">
+      ${r.status === 'Closed' || !can('referral_note') ? '' : `<div class="form" data-ref-form="${r.id}" data-case-id="${esc(r.caseId)}">
         <h4>Respond</h4>
         <input class="field" type="text" placeholder="e.g. Coaching ${esc(c.driver)} tomorrow; ride-along booked" aria-label="Note">
         ${r.workOrder ? '' : prioSeg(c.priority === 'critical' ? 'P1' : 'P2')}
@@ -218,7 +242,7 @@ function firmwareView() {
   const min = f.policy.minFirmware;
   const pending = f.belowMinimum.filter((v) => !v.requested);
   const byDepot = {};
-  f.belowMinimum.forEach((v) => (byDepot[v.depot] ||= []).push(v));
+  f.belowMinimum.filter((v) => inDepot(v.depot)).forEach((v) => (byDepot[v.depot] ||= []).push(v));
   return heading('Firmware', 'Set the oldest telematics firmware allowed on the road. Vehicles below it are listed and can be sent to maintenance for an update.') +
     `<section class="tiles">
       <div class="tile glass"><div class="k">Minimum version</div><div class="v">${min || '—'}</div><div class="s">${min ? 'set by ' + esc(f.policy.setBy) : 'not set yet'}</div></div>
@@ -229,12 +253,12 @@ function firmwareView() {
       <article class="card glass open" style="cursor:default"><div class="detail" style="padding-left:0;margin-top:0">
         <div><h4>Minimum allowed version</h4>
           <div class="seg" role="group" aria-label="Minimum firmware">${f.versions.slice().reverse().map((v) => `<button type="button" data-ver="${v.version}" aria-pressed="${v.version === (min || f.recommended)}">${v.version}${v.version === f.recommended ? ' · recommended' : ''}</button>`).join('')}</div></div>
-        <div class="btns"><button class="btn primary" data-fw="set_min_firmware">Save minimum</button></div>
+        ${can('set_min_firmware') ? '<div class="btns"><button class="btn primary" data-fw="set_min_firmware">Save minimum</button></div>' : ''}
         <div><h4>What each version does</h4>${f.versions.map((v) => `<div class="ev"><span class="when">${v.version}</span> · ${v.vehicles} vehicles · ${v.brakingPer100km} harsh-braking alerts per 100 km<div class="m">${esc(v.note)}</div></div>`).join('')}</div>
       </div></article>
       ${min ? (f.belowMinimum.length ? `<article class="card glass high open" style="cursor:default"><div class="detail" style="padding-left:0;margin-top:0">
         <div><h4>${f.belowMinimum.length} vehicles below ${min}</h4>${Object.entries(byDepot).map(([d, list]) => `<div class="ev"><span class="when">${esc(d)}</span> · ${list.length} vehicles<div class="m">${list.map((v) => `${v.vehicle} (${v.firmware})${v.requested ? ' ✓' : ''}`).join(' · ')}</div></div>`).join('')}</div>
-        ${pending.length ? `<div class="form" data-fw-req>
+        ${pending.length && can('request_firmware_update') ? `<div class="form" data-fw-req>
           <input class="field" type="text" placeholder="Note for maintenance (optional)" aria-label="Note">
           ${prioSeg('P2')}
           <div class="btns"><button class="btn primary" data-fw="request_firmware_update">Request updates for ${pending.length} vehicles</button></div>
@@ -243,10 +267,49 @@ function firmwareView() {
     </div>`;
 }
 
+// ---------- Business Manager (read-only oversight) ----------
+function asTeam(team, fn) {
+  const saved = DATA;
+  DATA = { ...saved.teams[team], permissions: [], rules: saved.rules, generatedFor: saved.generatedFor };
+  try { return fn(); } finally { DATA = saved; }
+}
+
+function adminView() {
+  if (TAB === 'ops') return asTeam('operations', () => heading('Operations', `Read-only. The ${DATA.rules.dailyCapacity} vehicle issues Operations sees first ${where()}.`) + cards(depotCases().filter((c) => c.tonight)));
+  if (TAB === 'safety') return asTeam('safety', () => heading('Safety', `Read-only. Safety's top driver issues and referrals ${where()}.`) + cards(depotCases().filter((c) => c.tonight)) + `<h2 class="section-title" style="margin-top:22px">Referrals from Ops</h2>` + (DATA.referrals.filter((r) => inDepot(r.case.depot)).map(referralCard).join('') || '<div class="empty glass">None yet.</div>'));
+  if (TAB === 'maint') return asTeam('maintenance', () => maintenance());
+  // Overview: every team's metrics and the depot picture
+  const T = DATA.teams;
+  const ops = asTeam('operations', () => caseMetrics(depotCases()));
+  const saf = asTeam('safety', () => caseMetrics(depotCases()));
+  const mm = T.maintenance.metrics;
+  const allCases = [...T.operations.cases, ...T.safety.cases];
+  const rows = DEPOTS.filter((d) => inDepot(d)).map((d) => {
+    const cs = allCases.filter((c) => c.depot === d);
+    const crit = cs.filter((c) => c.priority === 'critical').length;
+    const high = cs.length - crit;
+    const net = cs.filter((c) => c.network || c.backfill).length;
+    const max = Math.max(...DEPOTS.map((x) => allCases.filter((c) => c.depot === x).length));
+    return `<div class="r"><div class="grow"><div class="title">${d}</div><div class="bar"><span class="crit" style="width:${crit / max * 100}%"></span><span class="hi" style="width:${high / max * 100}%"></span></div>
+      <div class="sub">${crit} critical · ${high} high · ${net ? `<b class="neton">${net} network-affected</b>` : 'no network issues'}</div></div><span class="num">${cs.length}<div class="sub">cases</div></span></div>`;
+  }).join('');
+  const top = allCases.filter((c) => inDepot(c.depot)).sort((x, y) => y.score - x.score).slice(0, 5);
+  return heading('Overview', `Every team, depot and metric ${where()}. Read-only.`) +
+    `<section class="tiles four">
+      <div class="tile glass"><div class="k">Operations · tonight actioned</div><div class="v ${ops.guardrailBreached ? 'bad' : 'good'}">${ops.tonightActioned}<span class="s"> / ${ops.tonightQueue}</span></div><div class="s">${ops.resolved} resolved of ${ops.highCriticalSent}</div></div>
+      <div class="tile glass"><div class="k">Safety · tonight actioned</div><div class="v ${saf.guardrailBreached ? 'bad' : 'good'}">${saf.tonightActioned}<span class="s"> / ${saf.tonightQueue}</span></div><div class="s">${saf.resolved} resolved of ${saf.highCriticalSent}</div></div>
+      <div class="tile glass"><div class="k">Maintenance · awaiting approval</div><div class="v ${mm.pending ? 'bad' : 'good'}">${mm.pending}</div><div class="s">${mm.approved} approved · ${mm.withEta} with ETA</div></div>
+      <div class="tile glass"><div class="k">Firmware compliant</div><div class="v">${T.safety.firmware.policy.minFirmware ? T.safety.firmware.compliant + '<span class="s"> / ' + T.safety.firmware.total + '</span>' : '—'}</div><div class="s">${T.safety.firmware.policy.minFirmware ? 'minimum ' + T.safety.firmware.policy.minFirmware : 'no minimum set'}</div></div>
+    </section>
+    <h2 class="section-title">Depots</h2><div class="rows glass">${rows}</div>
+    <h2 class="section-title" style="margin-top:22px">Most urgent across teams</h2>
+    ${asTeam('operations', () => cards(top.map((c, i) => ({ ...c, rank: i + 1 }))))}`;
+}
+
 // ---------- Maintenance ----------
 function maintenance() {
   const m = DATA.metrics;
-  const list = DATA.workOrders.filter((w) => (TAB === 'done' ? w.status === 'Closed' : w.status !== 'Closed'));
+  const list = DATA.workOrders.filter((w) => inDepot(w.depot) && (TAB === 'done' ? w.status === 'Closed' : w.status !== 'Closed'));
   const tiles = `<section class="tiles">
     <div class="tile glass ${m.pending ? 'warn' : 'good'}"><div class="k">Waiting for approval</div><div class="v">${m.pending}</div><div class="s">from Ops & Safety</div></div>
     <div class="tile glass"><div class="k">Approved</div><div class="v">${m.approved}</div><div class="s">${m.withEta} with an ETA</div></div>
@@ -265,7 +328,7 @@ function woCard(w) {
       <span class="badge">${w.priority || (closed ? '✓' : '•')}</span>
       <div class="grow">
         <div class="title">${esc(w.vehicle_id)} · ${esc(w.work_done)}</div>
-        <div class="sub">${esc(w.wo_id)} · ${w.source === 'dashboard' ? 'from ' + esc(w.requestedBy) + ' · ' + esc(et(w.opened_local)) : 'shop system · opened ' + esc(w.opened_local)}</div>
+        <div class="sub">${esc(w.wo_id)}${w.depot ? ' · <b>' + esc(w.depot) + '</b>' : ''} · ${w.source === 'dashboard' ? 'from ' + esc(w.requestedBy) + ' · ' + esc(et(w.opened_local)) : 'shop system · opened ' + esc(w.opened_local)}</div>
         <div class="capsules"><span class="capsule ${w.status === 'Pending approval' ? 'high' : closed ? 'ok' : 'plain'}">${esc(w.status)}</span>${w.eta ? `<span class="capsule plain">ETA ${esc(fmtEta(w.eta))}</span>` : ''}</div>
       </div>
       <span class="chev">›</span>
@@ -277,7 +340,7 @@ function woCard(w) {
         ${w.request.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(n.text)}</div>`).join('')}</div>` : ''}
       ${w.technician_note ? `<div><h4>Technician note</h4><div class="ev">${esc(w.technician_note)}${w.closed_local ? `<div class="m">Closed ${esc(w.closed_local)}</div>` : ''}</div></div>` : ''}
       ${(w.notes || []).length ? `<div><h4>Notes</h4>${w.notes.map((n) => `<div class="note"><b>${esc(n.by)}</b> · ${esc(et(n.at))}<br>${esc(n.text)}</div>`).join('')}</div>` : ''}
-      ${closed ? '' : `<div class="form" data-wo-form="${esc(w.wo_id)}">
+      ${closed || !can('wo_note') ? '' : `<div class="form" data-wo-form="${esc(w.wo_id)}">
         <h4>Update</h4>
         ${w.status === 'Pending approval' ? '<div class="btns"><button class="btn primary" data-do="approve_wo">Approve work order</button></div>' : ''}
         <label class="sub" for="eta-${esc(w.wo_id)}">Estimated completion</label>
@@ -292,21 +355,20 @@ function woCard(w) {
 function lowMedium() {
   const f = filter;
   const types = [...new Set(DATA.lowMedium.map((a) => a.type))].sort();
-  const list = DATA.lowMedium.filter((a) => (f.priority === 'all' || a.priority === f.priority) && (f.type === 'all' || a.type === f.type) && (f.depot === 'all' || a.depot === f.depot));
+  const list = DATA.lowMedium.filter((a) => (f.priority === 'all' || a.priority === f.priority) && (f.type === 'all' || a.type === f.type) && inDepot(a.depot));
   const opt = (v, cur, label) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${label}</option>`;
   return heading('Low & medium', 'Not urgent and not tied to a work order. Kept here so tonight’s list stays short. Good for weekly reviews.') +
     `<div class="filters">
       <select class="field" data-f="priority" aria-label="Priority">${opt('all', f.priority, 'All priorities')}${opt('medium', f.priority, 'Medium')}${opt('low', f.priority, 'Low')}</select>
       <select class="field" data-f="type" aria-label="Type">${opt('all', f.type, 'All types')}${types.map((t) => opt(t, f.type, cap(t.replace(/_/g, ' ')))).join('')}</select>
-      <select class="field" data-f="depot" aria-label="Depot">${opt('all', f.depot, 'All depots')}${['North Yard', 'Airport Hub', 'Hamilton Depot'].map((d) => opt(d, f.depot, d)).join('')}</select>
     </div>
-    <div class="rows glass">${list.slice(0, f.limit).map((a) => `<div class="r ${a.priority}"><span class="dot"></span><div class="grow"><div class="title" style="font-size:.92rem">${esc(a.reason)}</div><div class="sub">${esc(a.vehicle)} · ${esc(a.driver)} · ${esc(a.depot)} · ${esc(a.when)} ET</div></div><span class="capsule">${cap(a.priority)}</span></div>`).join('') || '<div class="r">No alerts match.</div>'}</div>
+    <div class="rows glass">${list.slice(0, f.limit).map((a) => `<div class="r ${a.priority}"><span class="dot"></span><div class="grow"><div class="title" style="font-size:.92rem">${esc(a.reason)}</div><div class="sub">${esc(a.vehicle)}${a.vehicleClass ? ' · ' + esc(a.vehicleClass) : ''} · Driver ${esc(a.driver)} · <b>${esc(a.depot)}</b> · ${esc(a.when)} ET${a.backfill ? ' · arrived after network restored' : a.late ? ' · arrived late' : ''}</div></div><span class="capsule">${cap(a.priority)}</span></div>`).join('') || '<div class="r">No alerts match.</div>'}</div>
     ${list.length > f.limit ? `<button class="btn more" id="more">Show more (${list.length - f.limit})</button>` : ''}`;
 }
 
 function drivers() {
-  const rows = DATA.drivers.slice(0, 20).map((d) => `<div class="r ${d.driver === 'D-17' ? 'flag' : ''}"><span class="badge" style="--tone:${d.seriousRank <= 5 ? 'var(--high)' : 'var(--low)'}">${d.seriousRank}</span>
-    <div class="grow"><div class="title">${d.driver} <span class="sub">· ${d.vehicle} · firmware ${d.firmware}</span></div><div class="sub">${d.serious} serious events in ${d.km.toLocaleString()} km · raw count ${d.rawEvents} (rank ${d.rawRank})</div></div>
+  const rows = DATA.drivers.filter((d) => inDepot(d.depot)).slice(0, 20).map((d) => `<div class="r ${d.driver === 'D-17' ? 'flag' : ''}"><span class="badge" style="--tone:${d.seriousRank <= 5 ? 'var(--high)' : 'var(--low)'}">${d.seriousRank}</span>
+    <div class="grow"><div class="title">${d.driver} <span class="sub">· ${d.vehicle} · ${esc(d.depot)} · firmware ${d.firmware}</span></div><div class="sub">${d.serious} serious events in ${d.km.toLocaleString()} km · raw count ${d.rawEvents} (rank ${d.rawRank})</div></div>
     <span class="num">${d.seriousPer100}<div class="sub">per 100 km</div></span></div>`).join('');
   const d17 = DATA.drivers.find((d) => d.driver === 'D-17');
   return heading('Drivers', 'Ranked by serious events (braking ≥ 0.6 g or over 115 km/h) per 100 km, so drivers who drive more or have more sensitive devices aren’t unfairly ranked.') +
@@ -323,6 +385,7 @@ function activity() {
 
 // ---------- Events ----------
 function wire() {
+  document.querySelectorAll('[data-depot]').forEach((b) => b.addEventListener('click', () => { DEPOT = b.dataset.depot; store('depot', DEPOT); OPEN.clear(); render(); }));
   $('#signout').addEventListener('click', () => { USER = null; store('user', null); OPEN.clear(); load(); });
   document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { TAB = b.dataset.tab; store('tab', TAB); OPEN.clear(); render(); window.scrollTo({ top: 0 }); }));
   document.querySelectorAll('[data-card]').forEach((el) => {
