@@ -286,6 +286,30 @@ function silentCases(alerts, ctx) {
   return out;
 }
 
+// The separate facts Maple combined into one case: what a one-row-at-a-time filter can't see together.
+function signalsFor(c) {
+  const sig = [];
+  // Repeated events of one kind (speeding, braking) are one signal, not one per event.
+  if (['braking', 'speeding'].includes(c.kind)) return [c.title, ...(c.context || [])];
+  const readings =(list) => list.map((e) => (e.reason.match(/\((\d+(?:\.\d+)? (?:C|kPa))\)/) || [])[1]).filter(Boolean);
+  const byCode = {};
+  for (const e of c.evidence) { const k = e.reason.split(' — ')[0].replace(/\s*\(.*$/, ''); (byCode[k] ||= []).push(e); }
+  for (const [k, list] of Object.entries(byCode)) { const r = readings(list); sig.push(`${list.length > 1 ? list.length + '× ' : ''}${k}${r.length ? ' (' + r.join(', ') + ')' : ''}`); }
+  // Earlier "fixed" faults only count if related: same code, or a stop-the-vehicle code (cooling/oil) behind a critical case.
+  const codes = new Set(c.evidence.map((e) => (e.reason.match(/^P0\d{3}/) || [])[0]).filter(Boolean));
+  const related = (c.history || []).filter((h) => { const k = (h.reason.match(/^P0\d{3}/) || [])[0]; return codes.has(k) || (c.priority === 'critical' && /stop vehicle/.test(h.reason)); });
+  if (related.length) {
+    const r = readings(related);
+    sig.push(`Earlier: ${related.length}× ${related[0].reason.split(' (')[0].replace(/ — .*/, '')}${r.length > 1 ? ', rising ' + r.join(' → ') : ''}`);
+    sig.push(`Marked fixed: ${related[related.length - 1].wo}`);
+    sig.push('New stop-the-vehicle fault after that repair');
+  }
+  if (c.movedAfter?.length) sig.push(`Truck in use afterwards (${c.movedAfter.join(', ')} ET)`);
+  if (c.backfill) sig.push('Held by the Hamilton outage; arrived late');
+  if (c.workOrder?.state === 'open') sig.push(c.workOrder.note);
+  return sig;
+}
+
 function buildCases(alerts, ctx) {
   const groups = new Map();
   for (const a of alerts) {
@@ -381,7 +405,8 @@ function buildCases(alerts, ctx) {
     c.history = alerts.filter((a) => a.vehicle_id === c.vehicle && a.alert_type === 'engine_fault' && a.wo?.state === 'resolved')
       .map((a) => ({ id: a.alert_id, when: localStr(a.event_time_utc), reason: a.reason, vendor: a.vendor_severity, wo: a.wo.note }));
   }
-  cases.push(...networkCases(alerts, ctx), ...silentCases(alerts, ctx));
+  for (const c of cases) c.signals = signalsFor(c);
+  cases.push(...networkCases(alerts, ctx).map((c) => ({ ...c, signals: [] })), ...silentCases(alerts, ctx).map((c) => ({ ...c, signals: [] })));
   cases.sort((a, b) => b.score - a.score);
   cases.forEach((c, i) => { c.rank = i + 1; c.tonight = i < ctx.rules.dailyCapacity; });
   return cases;
@@ -525,8 +550,21 @@ function run() {
     return { id: a.alert_id, type: a.alert_type, priority: a.priority, vendor: a.vendor_severity, when: a.local, vehicle: a.vehicle_id, vehicleClass: v.vehicle_class, firmware: v.device_firmware,
       driver: a.driver_id, depot: a.depot, reason: a.reason, value: a.value, unit: a.unit, dtc: a.dtc_code, lateH: a.lagMin > RULES.lateMinutes ? +(a.lagMin / 60).toFixed(1) : 0, backfill: !!a.backfill, wo: a.wo?.note || '', aiNote: a.aiNote };
   }).sort((x, y) => y.when.localeCompare(x.when));
+  // The Excel test: what a "vendor severity = HIGH" filter would show vs what Maple shows.
+  const dayCount = new Set(alerts.map((a) => a.local.slice(0, 10))).size;
+  const vendorHigh = alerts.filter((a) => a.vendor_severity === 'HIGH');
+  const critical = alerts.filter((a) => a.priority === 'critical');
+  const filterTest = {
+    days: dayCount, filterName: 'vendor severity = HIGH', filterCount: vendorHigh.length, filterPerDay: Math.round(vendorHigh.length / dayCount),
+    rawPerDay: Math.round(ctx.raw.length / dayCount),
+    criticalTotal: critical.length,
+    criticalCaughtByFilter: critical.filter((a) => a.vendor_severity === 'HIGH').map((a) => ({ vehicle: a.vehicle_id, dtc: a.dtc_code, when: a.local, note: a.wo?.note || '' })),
+    criticalMissedByFilter: critical.filter((a) => a.vendor_severity !== 'HIGH').map((a) => ({ vehicle: a.vehicle_id, depot: a.depot, dtc: a.dtc_code, meaning: ctx.dtc[a.dtc_code]?.meaning, reading: a.value ? a.value + ' ' + a.unit : '', vendor: a.vendor_severity, when: a.local, late: a.backfill ? 'held by outage' : '' })),
+    filterNoise: vendorHigh.filter((a) => !['critical', 'high'].includes(a.priority)).length,
+    raisedBelowHigh: Object.entries(alerts.filter((a) => ['critical', 'high'].includes(a.priority) && a.vendor_severity !== 'HIGH').reduce((m, a) => ((m[a.alert_type] = (m[a.alert_type] || 0) + 1), m), {})),
+  };
   return {
-    series, allAlerts,
+    series, allAlerts, filterTest,
     generatedFor: 'Mon Sep 21 2026, 6:47 p.m. ET (incl. Hamilton backfill)',
     rules: RULES,
     counts,

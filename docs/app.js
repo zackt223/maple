@@ -17,11 +17,11 @@ const ROLE_META = {
 };
 // [id, label, sidebar group]
 const TABS = {
-  operations: [['tonight', 'Tonight', 'Workspace'], ['backlog', 'Backlog', 'Workspace'], ['other', 'Low & medium', 'Workspace'], ['insights', 'Insights', 'Data'], ['alerts', 'All alerts', 'Data'], ['activity', 'Activity', 'Data'], ['access', 'My access', 'Account']],
+  operations: [['tonight', 'Tonight', 'Workspace'], ['filter', 'Filter test', 'Workspace'], ['backlog', 'Backlog', 'Workspace'], ['other', 'Low & medium', 'Workspace'], ['insights', 'Insights', 'Data'], ['alerts', 'All alerts', 'Data'], ['activity', 'Activity', 'Data'], ['access', 'My access', 'Account']],
   safety: [['tonight', 'Tonight', 'Workspace'], ['referrals', 'From Ops', 'Workspace'], ['firmware', 'Firmware', 'Workspace'], ['drivers', 'Drivers', 'Workspace'], ['backlog', 'Backlog', 'Workspace'], ['other', 'Low & medium', 'Workspace'], ['insights', 'Insights', 'Data'], ['alerts', 'All alerts', 'Data'], ['activity', 'Activity', 'Data'], ['access', 'My access', 'Account']],
   maintenance: [['queue', 'Queue', 'Workspace'], ['done', 'Closed', 'Workspace'], ['activity', 'Activity', 'Data'], ['access', 'My access', 'Account']],
   finance: [['overview', 'Overview', 'Finance'], ['costs', 'Work orders & costs', 'Finance'], ['audit', 'Audit log', 'Finance'], ['insights', 'Insights', 'Data'], ['alerts', 'All alerts', 'Data'], ['access', 'My access', 'Account']],
-  admin: [['overview', 'Overview', 'Business'], ['ops', 'Operations', 'Teams'], ['safety', 'Safety', 'Teams'], ['maint', 'Maintenance', 'Teams'], ['costs', 'Costs', 'Teams'], ['insights', 'Insights', 'Data'], ['alerts', 'All alerts', 'Data'], ['activity', 'Audit log', 'Data'], ['access', 'Access', 'Account']],
+  admin: [['overview', 'Overview', 'Business'], ['filter', 'Filter test', 'Business'], ['ops', 'Operations', 'Teams'], ['safety', 'Safety', 'Teams'], ['maint', 'Maintenance', 'Teams'], ['costs', 'Costs', 'Teams'], ['insights', 'Insights', 'Data'], ['alerts', 'All alerts', 'Data'], ['activity', 'Audit log', 'Data'], ['access', 'Access', 'Account']],
 };
 
 function store(k, v) {
@@ -157,6 +157,7 @@ const where = () => (DEPOT === 'all' ? 'across all depots' : 'at ' + DEPOT);
 
 function view(role) {
   if (TAB === 'access') return accessView();
+  if (TAB === 'filter' && DATA.proof) return filterTestView();
   if (TAB === 'alerts') return allAlertsView();
   if (TAB === 'insights') return insightsView();
   if (role === 'finance') return TAB === 'costs' ? costsView() : TAB === 'audit' ? auditView() : financeOverview();
@@ -564,6 +565,79 @@ function exportCsv(kind) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+// ---------- Filter test: "why not just filter alerts in Excel?" ----------
+function filterTestView() {
+  const P = DATA.proof;
+  const f = P.filterTest;
+  const raised = f.raisedBelowHigh.reduce((n, [, v]) => n + v, 0);
+  const caught = f.criticalCaughtByFilter;
+  const team = (role, label) => {
+    const t = P.teams[role];
+    return `<div class="panel glass">
+      <div class="panel-head"><div class="panel-title">${label}</div><span class="capsule ${t.criticalWaiting.length ? 'critical' : 'ok'}">${t.criticalWaiting.length ? t.criticalWaiting.length + ' critical waiting' : 'No critical case waiting'}</span></div>
+      <div class="kpi-row">
+        <div class="kpi-box ${t.ratePct === 100 ? 'lime' : ''}"><div class="v">${t.actioned} / ${t.sent}</div><div class="s">tonight's cases acted on (${t.ratePct}%)</div></div>
+        <div class="kpi-box"><div class="v">${t.medianMinutes == null ? '—' : t.medianMinutes + ' min'}</div><div class="s">median time from shown to first action</div></div>
+      </div>
+      ${t.criticalWaiting.length ? `<div class="miss-list">${t.criticalWaiting.map((x) => `<div class="ev"><span class="capsule critical">Waiting</span> ${esc(x)}</div>`).join('')}</div>` : ''}
+    </div>`;
+  };
+  return heading('Filter test', `Why not just filter the alerts in Excel? Same ${f.days} days of data, two approaches, side by side.`) +
+    `<section class="vs">
+      <div class="panel glass vs-side">
+        <div class="eyebrow">Excel filter · ${esc(f.filterName)}</div>
+        <div class="vs-big">${f.filterCount}<span class="s"> alerts</span></div>
+        <div class="sub">${f.filterPerDay} a day to read, one row at a time</div>
+        <ul class="vs-list">
+          <li class="bad">Catches <b>${caught.length} of ${f.criticalTotal}</b> critical alerts${caught.length ? ` (${caught.map((c) => esc(c.vehicle + ' ' + c.dtc)).join(', ')}, already fixed)` : ''}</li>
+          <li class="bad">Misses every stop-the-vehicle fault on ${missedTrucks().map(esc).join(' and ')}</li>
+          <li class="bad">Flags ${f.filterNoise} speeding alerts at 115 km/h or below as HIGH</li>
+          <li class="bad">Can't tell you if anyone acted</li>
+        </ul>
+      </div>
+      <div class="vs-mid">vs</div>
+      <div class="panel glass vs-side win">
+        <div class="eyebrow">Maple</div>
+        <div class="vs-big">${DATA.rules.dailyCapacity}<span class="s"> a night per team</span></div>
+        <div class="sub">ranked, each with a reason and a next step</div>
+        <ul class="vs-list">
+          <li class="good">Catches <b>${f.criticalTotal} of ${f.criticalTotal}</b> critical alerts</li>
+          <li class="good">Raises ${raised} serious alerts the vendor marked below HIGH</li>
+          <li class="good">Combines separate signals into one action</li>
+          <li class="good">Tracks who acted, and how fast</li>
+        </ul>
+      </div>
+    </section>
+
+    <h2 class="section-title">Hidden by the filter</h2>
+    <p class="lede">Critical alerts (the fault-code list says to stop the vehicle) that the vendor marked below HIGH, so a HIGH filter never shows them.</p>
+    <div class="rows glass">${f.criticalMissedByFilter.map((m) => `<div class="r critical"><span class="dot"></span><div class="grow"><div class="title" style="font-size:.92rem">${esc(m.vehicle)} · ${esc(m.dtc)} ${esc(m.meaning)}${m.reading ? ' · <b>' + esc(m.reading) + '</b>' : ''}</div>
+      <div class="sub">${esc(m.when)} ET · ${esc(m.depot)}${m.late ? ' · ' + esc(m.late) : ''}</div></div><span class="capsule high">Vendor: ${esc(m.vendor)}</span><span class="capsule critical">Maple: Critical</span></div>`).join('')}</div>
+
+    <h2 class="section-title" style="margin-top:22px">What one row can't show</h2>
+    <p class="lede">A filter looks at one alert at a time. Maple joins related facts into one case with one action.</p>
+    <section class="grid-3">${P.stacked.map((c) => `<div class="panel glass stack ${c.priority}">
+      <div class="panel-title">${esc(c.title)}</div><div class="sub">${esc(c.depot)}</div>
+      <ol class="stack-list">${c.signals.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
+      <div class="stack-out"><span>${c.signals.length} signals → 1 action</span>${esc(c.action)}</div>
+    </div>`).join('')}</section>
+
+    <h2 class="section-title" style="margin-top:22px">Did anyone act?</h2>
+    <p class="lede">Measured from the moment a case first appeared on a team's tonight list to its first action (escalation, note, referral or resolution).</p>
+    <section class="grid-2">${team('operations', 'Operations · tonight')}${team('safety', 'Safety · tonight')}</section>
+
+    <div class="btns" style="margin-top:16px"><button class="btn primary" id="copySummary">Copy summary for email</button></div>`;
+}
+
+const missedTrucks = () => [...new Set(DATA.proof.filterTest.criticalMissedByFilter.map((m) => m.vehicle))];
+
+function filterSummary() {
+  const P = DATA.proof, f = P.filterTest, o = P.teams.operations, s = P.teams.safety;
+  return `Same ${f.days} days of Maple Freight alerts: a "${f.filterName}" filter shows ${f.filterCount} alerts (${f.filterPerDay} a day) and catches ${f.criticalTotal ? f.criticalCaughtByFilter.length : 0} of ${f.criticalTotal} critical alerts. It misses every stop-the-vehicle fault on ${missedTrucks().join(' and ')}. ` +
+    `Maple shows ${DATA.rules.dailyCapacity} ranked cases a night per team, catches all ${f.criticalTotal}, and tracks action: Operations ${o.actioned}/${o.sent} and Safety ${s.actioned}/${s.sent} of tonight's cases acted on` +
+    `${o.medianMinutes != null ? `, median ${o.medianMinutes} min to first action in Operations` : ''}. Live demo: https://zackt223.github.io/maple/`;
+}
+
 // ---------- Maintenance ----------
 function maintenance() {
   const m = DATA.metrics;
@@ -652,6 +726,11 @@ function wire() {
   document.querySelectorAll('[data-af-reset]').forEach((b) => b.addEventListener('click', () => { AF = { q: '', driver: 'all', vehicle: 'all', cls: 'all', fw: 'all', type: 'all', priority: 'all', range: 'all', page: 0 }; render(); }));
   document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => { AF.range = b.dataset.range; AF.page = 0; render(); }));
   document.querySelectorAll('[data-page]').forEach((b) => b.addEventListener('click', () => { AF.page += +b.dataset.page; render(); }));
+  const copy = $('#copySummary');
+  if (copy) copy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(filterSummary()); toast('Summary copied'); }
+    catch { prompt('Copy this summary:', filterSummary()); }
+  });
   document.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', () => exportCsv(b.dataset.export)));
   document.querySelectorAll('[data-chart-export]').forEach((b) => b.addEventListener('click', () => exportChart(b)));
   document.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => {

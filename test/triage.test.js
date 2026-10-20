@@ -248,3 +248,31 @@ test('late data: each depot shows when it last sent data, and new data bumps the
   assert.equal(core.version, v + 1, 'page sees a new version and refreshes');
   assert.ok(core.apiData(USERS['ops.manager']).lastReceived, 'freshness is sent to the page');
 });
+
+test('filter test: a vendor-HIGH filter misses the critical faults Maple catches', () => {
+  const f = r.filterTest;
+  assert.equal(f.filterCount, 313);
+  assert.equal(f.criticalTotal, 8);
+  assert.equal(f.criticalCaughtByFilter.length, 1, 'only V-114, already fixed');
+  assert.deepEqual([...new Set(f.criticalMissedByFilter.map((m) => m.vehicle))].sort(), ['V-108', 'V-137']);
+  const v137 = r.cases.find((c) => c.vehicle === 'V-137' && c.kind === 'engine');
+  assert.ok(v137.signals.some((s) => /rising 104 C → 109 C → 113 C → 118 C/.test(s)), 'trend joined into one case');
+  assert.ok(!r.cases.find((c) => c.vehicle === 'V-108' && c.kind === 'engine').signals.some((s) => /Marked fixed/.test(s)), 'unrelated old repair not counted');
+});
+
+test('alert-to-action: tracks tonight cases from first shown to first action', () => {
+  const { createCore } = require('../src/core');
+  const core = createCore({ triage: r, loadState: () => null, saveState: () => {} });
+  const ops = USERS['ops.manager'];
+  core.apiData(ops); // first shown
+  assert.equal(core.apiData(USERS['biz.admin']).proof.teams.operations.actioned, 0);
+  const first = core.apiData(ops).cases[0];
+  core.handleAction(ops, { action: 'case_note', caseId: first.id, note: 'Calling the driver' });
+  const p = core.apiData(USERS['biz.admin']).proof.teams.operations;
+  assert.equal(p.actioned, 1);
+  assert.equal(p.ratePct, 10);
+  assert.equal(p.medianMinutes, 0);
+  assert.ok(!p.criticalWaiting.includes(first.title));
+  const before = JSON.stringify(core.apiData(USERS['biz.admin']).proof.teams.safety.rows.map((x) => x.seen));
+  assert.ok(!before.includes('20'), 'business manager viewing does not count as Safety seeing its list');
+});

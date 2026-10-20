@@ -20,7 +20,7 @@ Optional:
 
 ```bash
 npm run report   # tonight's top 10 in the terminal
-npm test         # 25 automated checks
+npm test         # 27 automated checks
 ```
 
 To clear all escalations, notes and costs, delete `state.json` and restart.
@@ -55,6 +55,8 @@ A dashboard for the **Business Manager**, **Operations**, **Safety**, **Maintena
 - **Business Manager:** sees every team, depot and number.
 
 Every view can be narrowed to **North Yard**, **Airport Hub** or **Hamilton Depot**. An **All alerts** page filters by driver, vehicle and yard.
+
+A **Filter test** page (Operations and Business Manager) answers "why not just filter in Excel?" with the same data. A "vendor severity = HIGH" filter shows 313 alerts and catches 1 of 8 critical alerts, missing every stop-the-vehicle fault on V-137 and V-108. Maple catches all 8, shows which separate signals it combined into each action, and tracks alert-to-action rate and time-to-action.
 
 Charts show daily alert trends and can be **exported as PNG or JPEG** for pitch decks and presentations.
 
@@ -92,7 +94,7 @@ The truck photo in the background is blurred so the dashboard is easy to read.
 - Filtered alerts by driver, vehicle and yard.
 - Exported the charts as PNG and JPEG.
 - Signed in as each user to confirm they only see and change what they should.
-- Re-checked the numbers with a separate script (`scratch/validate.js`) and 25 automated tests (`npm test`), including one for each edge case listed under AI use.
+- Re-checked the numbers with a separate script (`scratch/validate.js`) and 27 automated tests (`npm test`), including one for each edge case listed under AI use.
 
 ## AI use
 - **Tools I used:** Claude Code

@@ -150,7 +150,43 @@ function metrics(role, cases, workOrders) {
   };
 }
 
-function apiData(user) {
+// When each of tonight's cases was first put in front of its team, so time-to-action can be measured.
+function markSeen(cases) {
+  state.seen ||= {};
+  let changed = false;
+  const now = new Date().toISOString();
+  for (const c of cases) if (!state.seen[c.id]) { state.seen[c.id] = now; changed = true; }
+  if (changed) save();
+}
+
+// "Did anyone act, and how fast?": alert-to-action rate and time-to-action for tonight's lists.
+function proof() {
+  const teams = {};
+  for (const role of ['operations', 'safety']) {
+    const tonight = scopedCases(role).filter((c) => c.tonight);
+    const rows = tonight.map((c) => {
+      const refIds = Object.entries(state.referrals).filter(([, r]) => r.caseId === c.id).map(([id]) => id);
+      const first = state.log.find((l) => l.target === c.id || refIds.includes(l.target));
+      const seen = state.seen?.[c.id];
+      return { id: c.id, title: c.title, priority: c.priority, seen, actedAt: first?.at || null, by: first?.user || null,
+        minutes: first && seen ? Math.max(0, Math.round((new Date(first.at) - new Date(seen)) / 60000)) : null };
+    });
+    const acted = rows.filter((r) => r.actedAt);
+    const mins = acted.map((r) => r.minutes).filter((m) => m != null).sort((a, b) => a - b);
+    teams[role] = {
+      sent: rows.length, actioned: acted.length, ratePct: rows.length ? Math.round(acted.length / rows.length * 100) : 0,
+      medianMinutes: mins.length ? mins[Math.floor(mins.length / 2)] : null,
+      criticalWaiting: rows.filter((r) => r.priority === 'critical' && !r.actedAt).map((r) => r.title),
+      rows,
+    };
+  }
+  const stacked = ['operations', 'safety'].flatMap((r) => scopedCases(r).filter((c) => c.tonight))
+    .filter((c) => (c.signals || []).length >= 3).sort((a, b) => b.signals.length - a.signals.length || b.score - a.score).slice(0, 3)
+    .map((c) => ({ title: c.title, priority: c.priority, depot: c.depot, signals: c.signals, action: c.actions[0] }));
+  return { filterTest: triage.filterTest, teams, stacked };
+}
+
+function apiData(user, opts = {}) {
   if (!user) return { users: USERS };
   const role = user.role;
   const base = { dataVersion, lastReceived: triage.quality.lastReceived, generatedFor: triage.generatedFor, rules: triage.rules, user: { ...user }, permissions: PERMISSIONS[role], access: ACCESS[role], series: triage.series, depots: triage.depots, canSeeAllAlerts: SEES_ALL_ALERTS.includes(role) };
@@ -166,12 +202,14 @@ function apiData(user) {
   if (role === 'admin') {
     // Business Manager: every team's dashboard and metrics.
     const teams = {};
-    for (const r of ['operations', 'safety', 'maintenance']) teams[r] = apiData(Object.values(USERS).find((u) => u.role === r));
+    for (const r of ['operations', 'safety', 'maintenance']) teams[r] = apiData(Object.values(USERS).find((u) => u.role === r), { peek: true });
     const workOrders = withCosts(allWorkOrders());
-    return { ...base, teams, workOrders, finance: financeSummary(workOrders), access: ACCESS, allAccess: true, log: state.log.slice(-200).reverse(), quality: triage.quality, counts: triage.counts, referralsAll: referrals() };
+    return { ...base, proof: proof(), teams, workOrders, finance: financeSummary(workOrders), access: ACCESS, allAccess: true, log: state.log.slice(-200).reverse(), quality: triage.quality, counts: triage.counts, referralsAll: referrals() };
   }
   const cases = scopedCases(role);
+  if (!opts.peek) markSeen(cases.filter((c) => c.tonight));
   const out = { ...base, cases, lowMedium: triage.lowMedium.filter((a) => ALERT_TEAMS[role].includes(teamOf(a.type))), log, metrics: metrics(role, cases) };
+  if (role === 'operations') out.proof = proof();
   if (role === 'safety') {
     out.drivers = triage.drivers.map((d) => ({ ...d, depot: depotOfMap()[d.vehicle] }));
     out.referrals = referrals();
